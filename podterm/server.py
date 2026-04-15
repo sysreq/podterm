@@ -47,6 +47,7 @@ from podterm.runpod import (
     api_create_pod,
     api_terminate_pod,
     create_or_update_template,
+    detect_redis_server,
     get_available_gpus,
     get_datacenters,
     get_gpt_golf_pods,
@@ -270,6 +271,12 @@ async def list_pods():
     return pods
 
 
+@app.get("/api/redis-server")
+async def redis_server():
+    addr = await asyncio.to_thread(detect_redis_server)
+    return {"address": addr}
+
+
 class LaunchConfig(BaseModel):
     branch: str
     name: str | None = None
@@ -281,13 +288,14 @@ class LaunchConfig(BaseModel):
     compile_debug: bool = False
     graph_logs: bool = False
     time_budget: int = 600
-    prep_shards: int = 10
+    prep_shards: int = 20
     data_repo_id: str = DEFAULT_DATA_REPO_ID
     data_version: str = DEFAULT_DATA_VERSION
     data_variant: str = DEFAULT_DATA_VARIANT
     data_path: str = ""
     tokenizer_path: str = ""
     vocab_size: str = ""
+    redis_cache_server: str = ""
 
 
 @app.post("/api/pods/launch")
@@ -316,9 +324,12 @@ async def launch_pod(cfg: LaunchConfig):
             "MAX_WALLCLOCK_SECONDS": str(cfg.time_budget),
             "TRAIN_LOG_EVERY": "250",
             "VAL_LOSS_EVERY": "1000",
+            "RUNPOD_ADMIN_API_KEY": "{{ RUNPOD_SECRET_SERVICE_API_KEY }}",
             "GITHUB_TOKEN": "{{ RUNPOD_SECRET_gh_gpt-golf_token }}",
             "HF_TOKEN": "{{ RUNPOD_SECRET_hf_gpt-golf_token }}",
         }
+        if cfg.redis_cache_server:
+            env["REDIS_CACHE_SERVER"] = cfg.redis_cache_server
         if cfg.profile_steps > 0:
             env["GPT_GOLF_PROFILE"] = str(cfg.profile_steps)
         env.update(build_optional_debug_env(cfg_dict))

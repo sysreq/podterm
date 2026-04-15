@@ -120,6 +120,26 @@ def get_gpt_golf_pods() -> list[dict]:
     return [p for p in api_list_pods() if p.get("name", "").startswith(f"{POD_PREFIX}-")]
 
 
+def api_get_pod(pod_id: str) -> dict:
+    return _rpc_json("pod", "get", pod_id)
+
+
+def detect_redis_server() -> str | None:
+    """Find a running pod with 'redis' in the image and return ip:port."""
+    for pod in api_list_pods():
+        if pod.get("desiredStatus") != "RUNNING":
+            continue
+        if "redis" not in (pod.get("imageName") or "").lower():
+            continue
+        details = api_get_pod(pod["id"])
+        ssh = details.get("ssh") or {}
+        ip = ssh.get("ip")
+        port = ssh.get("port")
+        if ip and port:
+            return f"{ip}:{port + 1}"
+    return None
+
+
 def api_create_pod(
     name: str,
     gpu: str,
@@ -132,7 +152,6 @@ def api_create_pod(
     cmd = ["pod", "create",
            "--name", name, "--gpu-id", gpu, "--template-id", template_id,
            "--cloud-type", cloud_type,
-           "--global-networking",
            "--container-disk-in-gb", str(DEFAULT_CONTAINER_DISK_GB),
            "--volume-in-gb", str(DEFAULT_VOLUME_DISK_GB)]
     if gpu_count > 1:

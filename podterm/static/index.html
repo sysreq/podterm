@@ -177,6 +177,8 @@
   <select id="f-gpu"></select>
   <label>Data Variant</label>
   <select id="f-variant" onchange="onVariantChange()"></select>
+  <label>Data shards</label>
+  <input id="f-shards" type="number" value="20" min="1">
   <details>
     <summary>Advanced</summary>
     <label>Name (optional)</label>
@@ -191,12 +193,12 @@
     <div class="chk-row"><input type="checkbox" id="f-graph-logs"><label style="margin:0">Graph logs</label></div>
     <label>Time budget (sec)</label>
     <input id="f-time" type="number" value="600" min="60">
-    <label>Data shards</label>
-    <input id="f-shards" type="number" value="10" min="1">
     <label>Data HF repo</label>
     <input id="f-data-repo" value="sysrekt/parameter-golf">
     <label>Data version (HF revision)</label>
     <input id="f-data-version" value="main">
+    <label>Redis cache server (ip:port)</label>
+    <input id="f-redis" placeholder="e.g. 10.0.0.5:6379">
   </details>
   <div class="btn-row">
     <button class="primary" onclick="doLaunch()">Launch</button>
@@ -545,11 +547,12 @@ async function stopPod() {
 async function openLaunchDialog() {
   const dlg = document.getElementById('launch-dialog');
   // Fetch form data in parallel
-  const [branches, dcs, variants, lastCfg] = await Promise.all([
+  const [branches, dcs, variants, lastCfg, redis] = await Promise.all([
     fetch('/api/branches').then(r=>r.json()),
     fetch('/api/datacenters').then(r=>r.json()),
     fetch('/api/variants').then(r=>r.json()),
     fetch('/api/last-config').then(r=>r.json()),
+    fetch('/api/redis-server').then(r=>r.json()),
   ]);
   variantLookup = variants.lookup || {};
 
@@ -568,9 +571,9 @@ async function openLaunchDialog() {
   if (lastCfg.compile_debug) document.getElementById('f-compile-debug').checked = lastCfg.compile_debug;
   if (lastCfg.graph_logs) document.getElementById('f-graph-logs').checked = lastCfg.graph_logs;
   if (lastCfg.time_budget) document.getElementById('f-time').value = lastCfg.time_budget;
-  if (lastCfg.prep_shards) document.getElementById('f-shards').value = lastCfg.prep_shards;
   if (lastCfg.data_repo_id) document.getElementById('f-data-repo').value = lastCfg.data_repo_id;
   if (lastCfg.data_version) document.getElementById('f-data-version').value = lastCfg.data_version;
+  document.getElementById('f-redis').value = lastCfg.redis_cache_server || redis.address || '';
 
   dlg.showModal();
 }
@@ -594,11 +597,6 @@ async function onDcChange() {
 }
 
 function onVariantChange() {
-  const v = document.getElementById('f-variant').value;
-  const info = variantLookup[v];
-  if (info && info.max_shards) {
-    document.getElementById('f-shards').value = Math.floor(info.max_shards * 0.4);
-  }
 }
 
 async function doLaunch() {
@@ -615,9 +613,10 @@ async function doLaunch() {
     compile_debug: document.getElementById('f-compile-debug').checked,
     graph_logs: document.getElementById('f-graph-logs').checked,
     time_budget: parseInt(document.getElementById('f-time').value) || 600,
-    prep_shards: parseInt(document.getElementById('f-shards').value) || 10,
+    prep_shards: parseInt(document.getElementById('f-shards').value) || 20,
     data_repo_id: document.getElementById('f-data-repo').value || 'sysrekt/parameter-golf',
     data_version: document.getElementById('f-data-version').value || 'main',
+    redis_cache_server: document.getElementById('f-redis').value || '',
     data_variant: vinfo.data_variant || variant,
     data_path: vinfo.data_path || '',
     tokenizer_path: vinfo.tokenizer_path || '',
