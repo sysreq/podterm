@@ -218,11 +218,11 @@
 <script>
 // ── State ──
 let activePod = null;
-let eventSource = null;
 let pods = [];
 let historyRuns = [];
 let selectedRuns = new Set();
 let variantLookup = {};
+const podState = {};  // pod_id → per-pod live state
 const COLORS = ['#ffd166','#ff6b6b','#48dbfb','#81ecec','#a29bfe','#fd79a8'];
 
 // Custom loss scale — bottom 50% = 3.0-3.5 (fine detail), then compressed above.
@@ -288,90 +288,140 @@ function selectPod(podId) {
   activePod = podId;
   renderPodList();
   switchTab('live');
-  startLiveView(podId);
+  renderLiveView(podId);
+}
+
+// ── Per-pod state ──
+function getPodState(podId) {
+  if (!podState[podId]) {
+    podState[podId] = {
+      es: null,
+      logText: '',
+      lossX: [], lossY: [], lossRaw: [],
+      baselineRunId: null, baselineByStep: {},
+      baselineX: [], baselineY: [], baselineRaw: [],
+      info: { step: 'Step: -', avg: 'Avg: -', loss: 'Loss: -', bpb: 'BPB: -', mem: 'Mem: -' },
+      lastMetric: null,
+    };
+  }
+  return podState[podId];
+}
+
+function ensurePodStream(podId) {
+  const state = getPodState(podId);
+  if (state.es) return;
+
+  const es = new EventSource(`/api/stream/${podId}`);
+  state.es = es;
+
+  es.addEventListener('log', e => {
+    const d = JSON.parse(e.data);
+    const lines = state.logText.split('\n');
+    if (lines.length > 500) state.logText = lines.slice(-400).join('\n');
+    state.logText += d.line + '\n';
+    if (activePod === podId) {
+      const viewer = document.getElementById('log-viewer');
+      viewer.textContent = state.logText;
+      viewer.scrollTop = viewer.scrollHeight;
+    }
+  });
+
+  es.addEventListener('metric', e => {
+    const m = JSON.parse(e.data);
+    if (m.train_loss && m.train_loss > 0) {
+      state.lossX.push(m.step);
+      state.lossY.push(scaleY(m.train_loss));
+      state.lossRaw.push(m.train_loss);
+    }
+    if (m.val_bpb != null) state.info.bpb = `BPB: ${m.val_bpb.toFixed(4)}`;
+    state.info.step = `Step: ${m.step}/${m.total_steps}`;
+    state.info.avg = `Avg: ${m.step_avg_ms.toFixed(1)} ms`;
+    if (m.train_loss > 0) state.info.loss = `Loss: ${m.train_loss.toFixed(4)}`;
+    state.lastMetric = m;
+
+    if (activePod === podId) {
+      if (m.train_loss && m.train_loss > 0) {
+        Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[scaleY(m.train_loss)]], customdata: [[m.train_loss]] }, [0]);
+      }
+      document.getElementById('info-step').textContent = state.info.step;
+      document.getElementById('info-avg').textContent = state.info.avg;
+      document.getElementById('info-loss').textContent = state.info.loss;
+      document.getElementById('info-bpb').textContent = state.info.bpb;
+      updateBaselineDiffs(m);
+    }
+  });
+
+  es.addEventListener('memory', e => {
+    const m = JSON.parse(e.data);
+    state.info.mem = `Mem: ${m.peak_mib} MiB`;
+    if (activePod === podId) {
+      document.getElementById('info-mem').textContent = state.info.mem;
+    }
+  });
+
+  es.addEventListener('phase', e => {
+    const d = JSON.parse(e.data);
+    if (d.phase && d.phase.includes('Starting Training')) {
+      state.lossX.length = 0;
+      state.lossY.length = 0;
+      state.lossRaw.length = 0;
+      if (activePod === podId) {
+        Plotly.restyle('chart-loss', { x: [[]], y: [[]], customdata: [[]] }, [0]);
+      }
+    }
+  });
 }
 
 // ── Live View ──
-function startLiveView(podId) {
-  // Close existing SSE
-  if (eventSource) { eventSource.close(); eventSource = null; }
+function renderLiveView(podId) {
+  ensurePodStream(podId);
+  const state = getPodState(podId);
 
   document.getElementById('live-placeholder').style.display = 'none';
   document.getElementById('live-info').style.display = 'flex';
   document.getElementById('live-baseline').style.display = 'flex';
   document.getElementById('live-charts').style.display = 'grid';
   document.getElementById('log-viewer').style.display = 'block';
-  document.getElementById('log-viewer').textContent = '';
+  document.getElementById('log-viewer').textContent = state.logText;
+  const viewer = document.getElementById('log-viewer');
+  viewer.scrollTop = viewer.scrollHeight;
 
-  // Populate baseline selector from history
-  loadBaselineOptions(podId);
-
-  // Find pod info
+  // Info bar — static from pod data, dynamic from cached state
   const pod = pods.find(p => p.id === podId) || {};
   const rt = pod.runtime || {};
   const gpus = rt.gpus || [];
   const gpuName = gpus.length ? gpus[0].gpuDisplayName : (pod.machine||{}).gpuDisplayName || pod.gpu || '-';
   const cost = pod.costPerHr || '?';
   document.getElementById('live-info').innerHTML =
-    `<span>GPU: ${gpuName}</span><span>$/hr: ${cost}</span><span id="info-step">Step: -</span><span id="info-avg">Avg: -</span><span id="info-loss">Loss: -</span><span id="info-bpb">BPB: -</span><span id="info-mem">Mem: -</span><a href="/api/runs/${podId}/log" target="_blank" style="color:#4a9eff;text-decoration:none;font-size:12px;margin-left:auto">Full Log</a>`;
+    `<span>GPU: ${gpuName}</span><span>$/hr: ${cost}</span><span id="info-step">${state.info.step}</span><span id="info-avg">${state.info.avg}</span><span id="info-loss">${state.info.loss}</span><span id="info-bpb">${state.info.bpb}</span><span id="info-mem">${state.info.mem}</span><a href="/api/runs/${podId}/log" target="_blank" style="color:#4a9eff;text-decoration:none;font-size:12px;margin-left:auto">Full Log</a>`;
 
-  // Init charts
-  Plotly.newPlot('chart-loss', [
-    { x: [], y: [], customdata: [], name: 'train_loss', type: 'scatter', line: { color: '#ffd166' }, hovertemplate: lossHover }
-  ], { ...plotLayout, yaxis: lossYAxis, height: 400 }, plotConfig);
+  // Rebuild chart from cached data
+  const traces = [
+    { x: state.lossX.slice(), y: state.lossY.slice(), customdata: state.lossRaw.slice(),
+      name: 'train_loss', type: 'scatter', line: { color: '#ffd166' }, hovertemplate: lossHover }
+  ];
+  if (state.baselineX.length) {
+    traces.push({ x: state.baselineX, y: state.baselineY, customdata: state.baselineRaw,
+      name: 'baseline', type: 'scatter', line: { color: 'rgba(255,255,255,0.35)', dash: 'dash' }, hovertemplate: lossHover });
+  }
+  Plotly.newPlot('chart-loss', traces, { ...plotLayout, yaxis: lossYAxis, height: 400 }, plotConfig);
 
-  // Connect SSE
-  eventSource = new EventSource(`/api/stream/${podId}`);
+  // Populate baseline selector and restore saved selection
+  loadBaselineOptions(podId);
 
-  eventSource.addEventListener('log', e => {
-    const d = JSON.parse(e.data);
-    const viewer = document.getElementById('log-viewer');
-    const lines = viewer.textContent.split('\n');
-    if (lines.length > 500) viewer.textContent = lines.slice(-400).join('\n');
-    viewer.textContent += d.line + '\n';
-    viewer.scrollTop = viewer.scrollHeight;
-  });
-
-  eventSource.addEventListener('metric', e => {
-    const m = JSON.parse(e.data);
-    if (m.train_loss && m.train_loss > 0) {
-      Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[scaleY(m.train_loss)]], customdata: [[m.train_loss]] }, [0]);
-    }
-    if (m.val_bpb != null) {
-      document.getElementById('info-bpb').textContent = `BPB: ${m.val_bpb.toFixed(4)}`;
-    }
-    document.getElementById('info-step').textContent = `Step: ${m.step}/${m.total_steps}`;
-    document.getElementById('info-avg').textContent = `Avg: ${m.step_avg_ms.toFixed(1)} ms`;
-    if (m.train_loss > 0) document.getElementById('info-loss').textContent = `Loss: ${m.train_loss.toFixed(4)}`;
-    updateBaselineDiffs(m);
-  });
-
-  eventSource.addEventListener('memory', e => {
-    const m = JSON.parse(e.data);
-    document.getElementById('info-mem').textContent = `Mem: ${m.peak_mib} MiB`;
-  });
-
-  eventSource.addEventListener('phase', e => {
-    const d = JSON.parse(e.data);
-    if (d.phase && d.phase.includes('Starting Training')) {
-      // Clear live data (trace 0) on restart, but keep log and SSE connection
-      Plotly.restyle('chart-loss', { x: [[]], y: [[]], customdata: [[]] }, [0]);
-      // Re-apply baseline if selected (it's still in trace 1)
-    }
-  });
+  // Restore baseline diffs
+  if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
 }
 
 // ── Baseline ──
-let baselineRunId = null;
-let baselineByStep = {};  // step → {train_loss, step_avg_ms, train_time_ms, val_bpb}
-
-async function loadBaselineOptions(currentPodId) {
+async function loadBaselineOptions(podId) {
   const sel = document.getElementById('baseline-select');
   sel.innerHTML = '<option value="">None</option>';
   try {
     const runs = await fetch('/api/runs?limit=30').then(r => r.json());
+    if (activePod !== podId) return;  // user switched during fetch
     for (const r of runs) {
-      if (r.run_id === currentPodId) continue; // skip self
+      if (r.run_id === podId) continue; // skip self
       if (!r.total_steps) continue; // skip runs with no data
       const bpb = r.best_val_bpb != null ? ` | BPB ${r.best_val_bpb.toFixed(4)}` : '';
       const label = `${r.pod_name||r.run_id} (${r.branch||'?'}${bpb})`;
@@ -381,56 +431,67 @@ async function loadBaselineOptions(currentPodId) {
       sel.appendChild(opt);
     }
   } catch(e) {}
+  // Restore saved selection
+  const state = getPodState(podId);
+  if (state.baselineRunId) sel.value = state.baselineRunId;
 }
 
 async function onBaselineChange() {
+  if (!activePod) return;
+  const state = getPodState(activePod);
+  const podId = activePod;
   const runId = document.getElementById('baseline-select').value;
 
-  // Remove existing baseline traces (always index 1 if present)
-  if (baselineRunId) {
+  // Remove existing baseline trace (always index 1 if present)
+  if (state.baselineRunId) {
     try { Plotly.deleteTraces('chart-loss', [1]); } catch(e) {}
   }
 
-  baselineRunId = runId || null;
-  baselineByStep = {};
+  state.baselineRunId = runId || null;
+  state.baselineByStep = {};
+  state.baselineX = [];
+  state.baselineY = [];
+  state.baselineRaw = [];
   document.getElementById('diff-loss').innerHTML = '';
   document.getElementById('diff-time').innerHTML = '';
 
   if (!runId) return;
 
-  // Fetch baseline metrics and build step lookup
   const metrics = await fetch(`/api/runs/${runId}/metrics`).then(r => r.json());
+  if (activePod !== podId) return;  // user switched during fetch
+
   for (const m of metrics) {
-    baselineByStep[m.step] = m;
+    state.baselineByStep[m.step] = m;
   }
-
   const baselineMetrics = metrics.filter(m => m.train_loss);
-  const trainSteps = baselineMetrics.map(m => m.step);
-  const trainLoss = baselineMetrics.map(m => scaleY(m.train_loss));
-  const trainLossRaw = baselineMetrics.map(m => m.train_loss);
-  const baseColor = 'rgba(255,255,255,0.35)';
+  state.baselineX = baselineMetrics.map(m => m.step);
+  state.baselineY = baselineMetrics.map(m => scaleY(m.train_loss));
+  state.baselineRaw = baselineMetrics.map(m => m.train_loss);
 
-  if (trainSteps.length) {
-    Plotly.addTraces('chart-loss', { x: trainSteps, y: trainLoss, customdata: trainLossRaw, name: 'baseline', type: 'scatter', line: { color: baseColor, dash: 'dash' }, hovertemplate: lossHover });
+  if (state.baselineX.length) {
+    Plotly.addTraces('chart-loss', { x: state.baselineX, y: state.baselineY, customdata: state.baselineRaw,
+      name: 'baseline', type: 'scatter', line: { color: 'rgba(255,255,255,0.35)', dash: 'dash' }, hovertemplate: lossHover });
   }
+  if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
 }
 
 function updateBaselineDiffs(m) {
-  // Find the closest baseline step at or below the current step
-  if (!baselineRunId || !Object.keys(baselineByStep).length) {
+  if (!activePod) return;
+  const state = getPodState(activePod);
+  if (!state.baselineRunId || !Object.keys(state.baselineByStep).length) {
     document.getElementById('diff-loss').innerHTML = '';
     document.getElementById('diff-time').innerHTML = '';
     return;
   }
 
-  const bSteps = Object.keys(baselineByStep).map(Number).sort((a,b) => a-b);
+  const bSteps = Object.keys(state.baselineByStep).map(Number).sort((a,b) => a-b);
   let bStep = null;
   for (let i = bSteps.length - 1; i >= 0; i--) {
     if (bSteps[i] <= m.step) { bStep = bSteps[i]; break; }
   }
   if (bStep == null) return;
 
-  const b = baselineByStep[bStep];
+  const b = state.baselineByStep[bStep];
   const diffEl = document.getElementById('diff-loss');
   const timeEl = document.getElementById('diff-time');
 
@@ -471,7 +532,9 @@ async function stopPod() {
   try {
     await fetch(`/api/pods/${activePod}/stop`, { method: 'POST' });
     document.getElementById('status').textContent = `Terminated ${activePod}`;
-    if (eventSource) { eventSource.close(); eventSource = null; }
+    const state = podState[activePod];
+    if (state && state.es) state.es.close();
+    delete podState[activePod];
     refreshPods();
   } catch(e) {
     document.getElementById('status').textContent = `Stop failed: ${e}`;

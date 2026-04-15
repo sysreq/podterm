@@ -132,6 +132,7 @@ def api_create_pod(
     cmd = ["pod", "create",
            "--name", name, "--gpu-id", gpu, "--template-id", template_id,
            "--cloud-type", cloud_type,
+           "--global-networking",
            "--container-disk-in-gb", str(DEFAULT_CONTAINER_DISK_GB),
            "--volume-in-gb", str(DEFAULT_VOLUME_DISK_GB)]
     if gpu_count > 1:
