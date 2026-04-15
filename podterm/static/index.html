@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PodTerm v2.0</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+         background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
+
+  /* Sidebar */
+  #sidebar { width: 220px; background: #16213e; border-right: 1px solid #2a2a4a;
+             display: flex; flex-direction: column; flex-shrink: 0; }
+  #sidebar h2 { padding: 16px; font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+  #pod-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+  .pod-btn { display: block; width: 100%; padding: 8px 12px; margin-bottom: 4px; background: #1a1a2e;
+             border: 1px solid #2a2a4a; border-radius: 6px; color: #e0e0e0; cursor: pointer;
+             text-align: left; font-size: 13px; transition: background 0.15s; }
+  .pod-btn:hover { background: #2a2a4a; }
+  .pod-btn.active { background: #0f3460; border-color: #4a9eff; }
+  .pod-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot-running { background: #4ade80; }
+  .dot-stopped { background: #666; }
+  #sidebar-actions { padding: 8px; border-top: 1px solid #2a2a4a; }
+  #sidebar-actions button { display: block; width: 100%; padding: 8px; margin-bottom: 4px;
+    background: #0f3460; border: 1px solid #4a9eff; border-radius: 6px; color: #e0e0e0;
+    cursor: pointer; font-size: 13px; transition: background 0.15s; }
+  #sidebar-actions button:hover { background: #1a5276; }
+  #sidebar-actions button.danger { background: #4a1520; border-color: #ff4a6e; }
+  #sidebar-actions button.danger:hover { background: #6a1a2a; }
+  #status { padding: 8px 12px; font-size: 11px; color: #666; border-top: 1px solid #2a2a4a; }
+
+  /* Main area */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #tab-bar { display: flex; background: #16213e; border-bottom: 1px solid #2a2a4a; }
+  .tab { padding: 10px 24px; cursor: pointer; border-bottom: 2px solid transparent;
+         color: #888; font-size: 13px; transition: all 0.15s; }
+  .tab:hover { color: #e0e0e0; }
+  .tab.active { color: #4a9eff; border-bottom-color: #4a9eff; }
+  .tab-content { display: none; flex: 1; overflow-y: auto; padding: 16px; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* Live tab */
+  #live-info { display: flex; gap: 24px; padding: 8px 0; font-size: 13px; color: #aaa;
+               flex-wrap: wrap; margin-bottom: 8px; }
+  #live-info span { background: #16213e; padding: 4px 10px; border-radius: 4px; }
+  #live-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #live-charts .chart-box { background: #16213e; border-radius: 8px; padding: 4px; min-height: 200px; }
+  #live-charts .chart-wide { grid-column: 1 / -1; }
+  #log-viewer { margin-top: 8px; background: #0d1117; border: 1px solid #2a2a4a; border-radius: 8px;
+                padding: 12px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px;
+                line-height: 1.5; max-height: 250px; overflow-y: auto; white-space: pre-wrap;
+                word-break: break-all; flex-shrink: 0; }
+
+  /* History tab */
+  #history-filter { padding: 8px 12px; background: #16213e; border: 1px solid #2a2a4a;
+                    border-radius: 6px; color: #e0e0e0; width: 300px; margin-bottom: 12px; font-size: 13px; }
+  #history-actions { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  #history-actions button { padding: 6px 16px; background: #0f3460; border: 1px solid #4a9eff;
+    border-radius: 6px; color: #e0e0e0; cursor: pointer; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; padding: 8px; background: #16213e; border-bottom: 2px solid #2a2a4a;
+       color: #888; font-weight: 600; cursor: pointer; user-select: none; }
+  th:hover { color: #e0e0e0; }
+  td { padding: 6px 8px; border-bottom: 1px solid #1e1e3a; }
+  tr:hover td { background: #1e1e3a; }
+
+  /* Compare tab */
+  #compare-charts .chart-box { background: #16213e; border-radius: 8px; padding: 4px;
+                                min-height: 280px; margin-bottom: 12px; }
+
+  /* Launch dialog */
+  dialog { background: #1a1a2e; color: #e0e0e0; border: 1px solid #4a9eff; border-radius: 12px;
+           padding: 24px; width: 520px; max-height: 80vh; overflow-y: auto; }
+  dialog::backdrop { background: rgba(0,0,0,0.7); }
+  dialog h3 { margin-bottom: 16px; }
+  dialog label { display: block; font-size: 12px; color: #888; margin-top: 10px; margin-bottom: 4px; }
+  dialog input, dialog select { display: block; width: 100%; padding: 8px; background: #16213e;
+    border: 1px solid #2a2a4a; border-radius: 6px; color: #e0e0e0; font-size: 13px; }
+  dialog .btn-row { margin-top: 16px; display: flex; gap: 8px; }
+  dialog button { padding: 8px 24px; border-radius: 6px; border: 1px solid #4a9eff;
+    background: #0f3460; color: #e0e0e0; cursor: pointer; font-size: 13px; }
+  dialog button.primary { background: #4a9eff; color: #000; font-weight: 600; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: #888; font-size: 13px; }
+  dialog .chk-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  dialog .chk-row input[type=checkbox] { width: auto; }
+
+  /* Placeholder */
+  .placeholder { color: #555; text-align: center; padding: 60px 0; font-size: 14px; }
+
+  /* Plotly overrides */
+  .js-plotly-plot .plotly .modebar { right: 8px !important; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>PodTerm</h2>
+  <div id="pod-list"></div>
+  <div id="sidebar-actions">
+    <button onclick="openLaunchDialog()">Launch</button>
+    <button class="danger" onclick="stopPod()">Stop</button>
+    <button onclick="refreshPods()">Refresh</button>
+  </div>
+  <div id="status">Loading...</div>
+</div>
+
+<div id="main">
+  <div id="tab-bar">
+    <div class="tab active" data-tab="live" onclick="switchTab('live')">Live</div>
+    <div class="tab" data-tab="history" onclick="switchTab('history')">History</div>
+    <div class="tab" data-tab="compare" onclick="switchTab('compare')">Compare</div>
+  </div>
+
+  <!-- Live Tab -->
+  <div id="tab-live" class="tab-content active">
+    <div id="live-placeholder" class="placeholder">Select a running pod or launch a new experiment.</div>
+    <div id="live-info" style="display:none"></div>
+    <div id="live-charts" style="display:none">
+      <div class="chart-box chart-wide"><div id="chart-loss"></div></div>
+      <div class="chart-box"><div id="chart-time"></div></div>
+      <div class="chart-box"><div id="chart-bpb"></div></div>
+    </div>
+    <div id="log-viewer" style="display:none"></div>
+  </div>
+
+  <!-- History Tab -->
+  <div id="tab-history" class="tab-content">
+    <input id="history-filter" placeholder="Filter by branch or GPU..." oninput="filterHistory()">
+    <div id="history-actions">
+      <button onclick="compareSelected()">Compare Selected</button>
+      <button onclick="clearSelection()">Clear</button>
+      <span id="selection-count">0 selected</span>
+    </div>
+    <div id="history-table-area"></div>
+  </div>
+
+  <!-- Compare Tab -->
+  <div id="tab-compare" class="tab-content">
+    <div id="compare-placeholder" class="placeholder">Select runs from History tab, then click Compare.</div>
+    <div id="compare-charts"></div>
+    <div id="compare-summary"></div>
+  </div>
+</div>
+
+<!-- Launch Dialog -->
+<dialog id="launch-dialog">
+  <h3>Launch Experiment</h3>
+  <label>Branch</label>
+  <select id="f-branch"></select>
+  <label>Datacenter</label>
+  <select id="f-dc" onchange="onDcChange()"></select>
+  <label>GPU</label>
+  <select id="f-gpu"></select>
+  <label>Data Variant</label>
+  <select id="f-variant" onchange="onVariantChange()"></select>
+  <details>
+    <summary>Advanced</summary>
+    <label>Name (optional)</label>
+    <input id="f-name" placeholder="defaults to branch name">
+    <label>GPU count</label>
+    <input id="f-gpu-count" type="number" value="1" min="1" max="8">
+    <label>Train script</label>
+    <input id="f-train-script" value="train_gpt.py">
+    <label>Profile steps (0 = disabled)</label>
+    <input id="f-profile" type="number" value="0" min="0">
+    <div class="chk-row"><input type="checkbox" id="f-compile-debug"><label style="margin:0">Compile graph debug</label></div>
+    <div class="chk-row"><input type="checkbox" id="f-graph-logs"><label style="margin:0">Graph logs</label></div>
+    <label>Time budget (sec)</label>
+    <input id="f-time" type="number" value="600" min="60">
+    <label>Data shards</label>
+    <input id="f-shards" type="number" value="10" min="1">
+    <label>Data HF repo</label>
+    <input id="f-data-repo" value="sysrekt/parameter-golf">
+    <label>Data version (HF revision)</label>
+    <input id="f-data-version" value="main">
+  </details>
+  <div class="btn-row">
+    <button class="primary" onclick="doLaunch()">Launch</button>
+    <button onclick="document.getElementById('launch-dialog').close()">Cancel</button>
+  </div>
+</dialog>
+
+<script>
+// ── State ──
+let activePod = null;
+let eventSource = null;
+let pods = [];
+let historyRuns = [];
+let selectedRuns = new Set();
+let variantLookup = {};
+const COLORS = ['#ffd166','#ff6b6b','#48dbfb','#81ecec','#a29bfe','#fd79a8'];
+const plotLayout = {
+  paper_bgcolor: '#16213e', plot_bgcolor: '#16213e', font: { color: '#aaa', size: 11 },
+  margin: { l: 50, r: 20, t: 30, b: 35 }, legend: { orientation: 'h', y: -0.15 },
+  xaxis: { gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+  yaxis: { gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+};
+const plotConfig = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d','select2d'] };
+
+// ── Tabs ──
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === 'tab-'+tab));
+  if (tab === 'history') loadHistory();
+}
+
+// ── Pods ──
+async function refreshPods() {
+  try {
+    const r = await fetch('/api/pods');
+    pods = await r.json();
+    renderPodList();
+    const running = pods.filter(p => p.desiredStatus === 'RUNNING').length;
+    document.getElementById('status').textContent = `${pods.length} pods, ${running} running`;
+  } catch(e) {
+    document.getElementById('status').textContent = 'Error loading pods';
+  }
+}
+
+function renderPodList() {
+  const el = document.getElementById('pod-list');
+  el.innerHTML = '';
+  for (const p of pods) {
+    const btn = document.createElement('button');
+    btn.className = 'pod-btn' + (p.id === activePod ? ' active' : '');
+    const running = p.desiredStatus === 'RUNNING';
+    btn.innerHTML = `<span class="pod-dot ${running ? 'dot-running' : 'dot-stopped'}"></span>${(p.name||p.id).slice(0,22)}`;
+    btn.onclick = () => selectPod(p.id);
+    el.appendChild(btn);
+  }
+}
+
+function selectPod(podId) {
+  activePod = podId;
+  renderPodList();
+  switchTab('live');
+  startLiveView(podId);
+}
+
+// ── Live View ──
+function startLiveView(podId) {
+  // Close existing SSE
+  if (eventSource) { eventSource.close(); eventSource = null; }
+
+  document.getElementById('live-placeholder').style.display = 'none';
+  document.getElementById('live-info').style.display = 'flex';
+  document.getElementById('live-charts').style.display = 'grid';
+  document.getElementById('log-viewer').style.display = 'block';
+  document.getElementById('log-viewer').textContent = '';
+
+  // Find pod info
+  const pod = pods.find(p => p.id === podId) || {};
+  const rt = pod.runtime || {};
+  const gpus = rt.gpus || [];
+  const gpuName = gpus.length ? gpus[0].gpuDisplayName : (pod.machine||{}).gpuDisplayName || pod.gpu || '-';
+  const cost = pod.costPerHr || '?';
+  document.getElementById('live-info').innerHTML =
+    `<span>GPU: ${gpuName}</span><span>$/hr: ${cost}</span><span id="info-step">Step: -</span><span id="info-avg">Avg: -</span><span id="info-loss">Loss: -</span><span id="info-bpb">BPB: -</span><span id="info-mem">Mem: -</span>`;
+
+  // Init charts
+  Plotly.newPlot('chart-loss', [
+    { x: [], y: [], name: 'train_loss', type: 'scatter', line: { color: '#ffd166' } }
+  ], { ...plotLayout, title: 'Training Loss', height: 240 }, plotConfig);
+
+  Plotly.newPlot('chart-time', [
+    { x: [], y: [], name: 'step_avg', type: 'scatter', line: { color: '#48dbfb' } }
+  ], { ...plotLayout, title: 'Step Time (ms)', height: 200 }, plotConfig);
+
+  Plotly.newPlot('chart-bpb', [
+    { x: [], y: [], name: 'val_bpb', mode: 'markers', type: 'scatter', marker: { color: '#ff6b6b', size: 8 } }
+  ], { ...plotLayout, title: 'Validation BPB', height: 200 }, plotConfig);
+
+  // Connect SSE
+  eventSource = new EventSource(`/api/stream/${podId}`);
+
+  eventSource.addEventListener('log', e => {
+    const d = JSON.parse(e.data);
+    const viewer = document.getElementById('log-viewer');
+    const lines = viewer.textContent.split('\n');
+    if (lines.length > 500) viewer.textContent = lines.slice(-400).join('\n');
+    viewer.textContent += d.line + '\n';
+    viewer.scrollTop = viewer.scrollHeight;
+  });
+
+  eventSource.addEventListener('metric', e => {
+    const m = JSON.parse(e.data);
+    if (m.train_loss && m.train_loss > 0) {
+      Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[m.train_loss]] }, [0]);
+    }
+    Plotly.extendTraces('chart-time', { x: [[m.step]], y: [[m.step_avg_ms]] }, [0]);
+    if (m.val_bpb != null) {
+      Plotly.extendTraces('chart-bpb', { x: [[m.step]], y: [[m.val_bpb]] }, [0]);
+      document.getElementById('info-bpb').textContent = `BPB: ${m.val_bpb.toFixed(4)}`;
+    }
+    document.getElementById('info-step').textContent = `Step: ${m.step}/${m.total_steps}`;
+    document.getElementById('info-avg').textContent = `Avg: ${m.step_avg_ms.toFixed(1)} ms`;
+    if (m.train_loss > 0) document.getElementById('info-loss').textContent = `Loss: ${m.train_loss.toFixed(4)}`;
+  });
+
+  eventSource.addEventListener('memory', e => {
+    const m = JSON.parse(e.data);
+    document.getElementById('info-mem').textContent = `Mem: ${m.peak_mib} MiB`;
+  });
+
+  eventSource.addEventListener('phase', e => {
+    const d = JSON.parse(e.data);
+    if (d.phase && d.phase.includes('Starting Training')) {
+      // Clear charts on restart
+      Plotly.purge('chart-loss'); Plotly.purge('chart-time'); Plotly.purge('chart-bpb');
+      startLiveView(podId);
+    }
+  });
+}
+
+// ── Stop ──
+async function stopPod() {
+  if (!activePod) return;
+  if (!confirm(`Terminate pod ${activePod}?`)) return;
+  document.getElementById('status').textContent = `Stopping ${activePod}...`;
+  try {
+    await fetch(`/api/pods/${activePod}/stop`, { method: 'POST' });
+    document.getElementById('status').textContent = `Terminated ${activePod}`;
+    if (eventSource) { eventSource.close(); eventSource = null; }
+    refreshPods();
+  } catch(e) {
+    document.getElementById('status').textContent = `Stop failed: ${e}`;
+  }
+}
+
+// ── Launch Dialog ──
+async function openLaunchDialog() {
+  const dlg = document.getElementById('launch-dialog');
+  // Fetch form data in parallel
+  const [branches, dcs, variants, lastCfg] = await Promise.all([
+    fetch('/api/branches').then(r=>r.json()),
+    fetch('/api/datacenters').then(r=>r.json()),
+    fetch('/api/variants').then(r=>r.json()),
+    fetch('/api/last-config').then(r=>r.json()),
+  ]);
+  variantLookup = variants.lookup || {};
+
+  fillSelect('f-branch', branches.map(b => ({label: b, id: b})), lastCfg.branch);
+  fillSelect('f-dc', dcs.map(dc => ({label: `${dc.id} (${dc.location||''})`, id: dc.id})), lastCfg.datacenter);
+  fillSelect('f-variant', variants.options || [], lastCfg.data_variant);
+
+  // Load GPUs for selected DC
+  await onDcChange();
+
+  // Populate advanced fields from last config
+  if (lastCfg.name) document.getElementById('f-name').value = lastCfg.name;
+  if (lastCfg.gpu_count) document.getElementById('f-gpu-count').value = lastCfg.gpu_count;
+  if (lastCfg.train_script) document.getElementById('f-train-script').value = lastCfg.train_script;
+  if (lastCfg.profile_steps) document.getElementById('f-profile').value = lastCfg.profile_steps;
+  if (lastCfg.compile_debug) document.getElementById('f-compile-debug').checked = lastCfg.compile_debug;
+  if (lastCfg.graph_logs) document.getElementById('f-graph-logs').checked = lastCfg.graph_logs;
+  if (lastCfg.time_budget) document.getElementById('f-time').value = lastCfg.time_budget;
+  if (lastCfg.prep_shards) document.getElementById('f-shards').value = lastCfg.prep_shards;
+  if (lastCfg.data_repo_id) document.getElementById('f-data-repo').value = lastCfg.data_repo_id;
+  if (lastCfg.data_version) document.getElementById('f-data-version').value = lastCfg.data_version;
+
+  dlg.showModal();
+}
+
+function fillSelect(id, options, defaultVal) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = '';
+  for (const o of options) {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.label;
+    if (o.id === defaultVal) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+async function onDcChange() {
+  const dc = document.getElementById('f-dc').value;
+  const gpus = await fetch(`/api/gpus/${dc}`).then(r=>r.json());
+  fillSelect('f-gpu', gpus, null);
+}
+
+function onVariantChange() {
+  const v = document.getElementById('f-variant').value;
+  const info = variantLookup[v];
+  if (info && info.max_shards) {
+    document.getElementById('f-shards').value = Math.floor(info.max_shards * 0.4);
+  }
+}
+
+async function doLaunch() {
+  const variant = document.getElementById('f-variant').value;
+  const vinfo = variantLookup[variant] || {};
+  const cfg = {
+    branch: document.getElementById('f-branch').value,
+    name: document.getElementById('f-name').value || null,
+    datacenter: document.getElementById('f-dc').value,
+    gpu: document.getElementById('f-gpu').value,
+    gpu_count: parseInt(document.getElementById('f-gpu-count').value) || 1,
+    train_script: document.getElementById('f-train-script').value || 'train_gpt.py',
+    profile_steps: parseInt(document.getElementById('f-profile').value) || 0,
+    compile_debug: document.getElementById('f-compile-debug').checked,
+    graph_logs: document.getElementById('f-graph-logs').checked,
+    time_budget: parseInt(document.getElementById('f-time').value) || 600,
+    prep_shards: parseInt(document.getElementById('f-shards').value) || 10,
+    data_repo_id: document.getElementById('f-data-repo').value || 'sysrekt/parameter-golf',
+    data_version: document.getElementById('f-data-version').value || 'main',
+    data_variant: vinfo.data_variant || variant,
+    data_path: vinfo.data_path || '',
+    tokenizer_path: vinfo.tokenizer_path || '',
+    vocab_size: vinfo.vocab_size || '',
+  };
+
+  document.getElementById('launch-dialog').close();
+  document.getElementById('status').textContent = 'Launching...';
+
+  try {
+    const r = await fetch('/api/pods/launch', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg)
+    });
+    const result = await r.json();
+    document.getElementById('status').textContent = `Launched ${result.name} ($${result.cost_per_hr}/hr)`;
+    await refreshPods();
+    selectPod(result.pod_id);
+  } catch(e) {
+    document.getElementById('status').textContent = `Launch failed: ${e}`;
+  }
+}
+
+// ── History ──
+async function loadHistory() {
+  try {
+    const r = await fetch('/api/runs');
+    historyRuns = await r.json();
+    renderHistoryTable();
+  } catch(e) {}
+}
+
+function filterHistory() {
+  renderHistoryTable();
+}
+
+function renderHistoryTable() {
+  const ft = (document.getElementById('history-filter').value || '').toLowerCase();
+  let runs = historyRuns;
+  if (ft) {
+    runs = runs.filter(r => ((r.branch||'')+(r.gpu_type||'')+(r.pod_name||'')).toLowerCase().includes(ft));
+  }
+
+  const area = document.getElementById('history-table-area');
+  if (!runs.length) { area.innerHTML = '<div class="placeholder">No runs found.</div>'; return; }
+
+  let html = '<table><thead><tr><th></th><th>Date</th><th>Branch</th><th>Commit</th><th>GPU</th><th>Variant</th><th>Steps</th><th>Best BPB</th><th>Cost</th><th>Status</th></tr></thead><tbody>';
+  for (const r of runs) {
+    const checked = selectedRuns.has(r.run_id) ? 'checked' : '';
+    const date = (r.started_at||'').slice(0,16).replace('T',' ');
+    const commit = (r.commit_hash||'-').slice(0,7);
+    const bpb = r.best_val_bpb != null ? r.best_val_bpb.toFixed(4) : '-';
+    const cost = r.total_cost != null ? `$${r.total_cost.toFixed(3)}` : '-';
+    let status = '-';
+    if (r.exit_code == null) status = r.finished_at ? '?' : 'running';
+    else if (r.exit_code === 0) status = 'done';
+    else status = `exit ${r.exit_code}`;
+
+    html += `<tr>
+      <td><input type="checkbox" ${checked} onchange="toggleRun('${r.run_id}', this.checked)"></td>
+      <td>${date}</td><td>${r.branch||'-'}</td><td>${commit}</td><td>${r.gpu_type||'-'}</td>
+      <td>${r.data_variant||'-'}</td><td>${r.total_steps||'-'}</td><td>${bpb}</td><td>${cost}</td><td>${status}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  area.innerHTML = html;
+}
+
+function toggleRun(runId, checked) {
+  if (checked) selectedRuns.add(runId); else selectedRuns.delete(runId);
+  document.getElementById('selection-count').textContent = `${selectedRuns.size} selected`;
+}
+
+function clearSelection() {
+  selectedRuns.clear();
+  document.getElementById('selection-count').textContent = '0 selected';
+  renderHistoryTable();
+}
+
+// ── Compare ──
+async function compareSelected() {
+  if (selectedRuns.size < 2) { alert('Select at least 2 runs.'); return; }
+  switchTab('compare');
+  document.getElementById('compare-placeholder').style.display = 'none';
+
+  const r = await fetch('/api/compare', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ run_ids: [...selectedRuns] })
+  });
+  const data = await r.json();
+
+  // Loss comparison chart
+  const lossTraces = [];
+  const bpbTraces = [];
+  let i = 0;
+  for (const [rid, metrics] of Object.entries(data.metrics)) {
+    const run = data.runs[rid] || {};
+    const label = `${run.branch||''}@${(run.commit_hash||'').slice(0,7)}`;
+    const color = COLORS[i % COLORS.length];
+
+    const trainSteps = metrics.filter(m => m.train_loss).map(m => m.step);
+    const trainLoss = metrics.filter(m => m.train_loss).map(m => m.train_loss);
+    if (trainSteps.length) {
+      lossTraces.push({ x: trainSteps, y: trainLoss, name: label, type: 'scatter', line: { color } });
+    }
+
+    const valSteps = metrics.filter(m => m.val_bpb != null).map(m => m.step);
+    const valBpb = metrics.filter(m => m.val_bpb != null).map(m => m.val_bpb);
+    if (valSteps.length) {
+      bpbTraces.push({ x: valSteps, y: valBpb, name: label, mode: 'markers+lines', marker: { color, size: 8 }, line: { color } });
+    }
+    i++;
+  }
+
+  const chartsEl = document.getElementById('compare-charts');
+  chartsEl.innerHTML = '<div class="chart-box" id="cmp-loss"></div><div class="chart-box" id="cmp-bpb"></div>';
+  Plotly.newPlot('cmp-loss', lossTraces, { ...plotLayout, title: 'Training Loss Comparison', height: 300 }, plotConfig);
+  Plotly.newPlot('cmp-bpb', bpbTraces, { ...plotLayout, title: 'Validation BPB Comparison', height: 300 }, plotConfig);
+
+  // Summary table
+  let summaryHtml = '<table><thead><tr><th>Run</th><th>Branch</th><th>GPU</th><th>Steps</th><th>Best BPB</th><th>Cost</th></tr></thead><tbody>';
+  for (const rid of Object.keys(data.runs)) {
+    const run = data.runs[rid] || {};
+    const bpb = run.best_val_bpb != null ? run.best_val_bpb.toFixed(4) : '-';
+    const cost = run.total_cost != null ? `$${run.total_cost.toFixed(3)}` : '-';
+    summaryHtml += `<tr><td>${(run.pod_name||rid).slice(0,20)}</td><td>${run.branch||'-'}</td><td>${run.gpu_type||'-'}</td><td>${run.total_steps||'-'}</td><td>${bpb}</td><td>${cost}</td></tr>`;
+  }
+  summaryHtml += '</tbody></table>';
+  document.getElementById('compare-summary').innerHTML = summaryHtml;
+}
+
+// ── Init ──
+refreshPods();
+setInterval(refreshPods, 15000);
+</script>
+</body>
+</html>

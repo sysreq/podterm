@@ -1,10 +1,10 @@
 """Entry point for podterm: uv run podterm"""
 
-from podterm.app import run_app
+import uvicorn
 
 
 def main() -> None:
-    run_app()
+    uvicorn.run("podterm.server:app", host="127.0.0.1", port=8000)
 
 
 if __name__ == "__main__":
