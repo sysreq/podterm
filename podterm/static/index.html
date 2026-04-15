@@ -134,7 +134,14 @@
       </select>
     </div>
     <div id="live-charts" style="display:none">
-      <div class="chart-box chart-wide"><div id="chart-loss"></div></div>
+      <div class="chart-box chart-wide">
+        <div id="chart-loss-header" style="display:flex;align-items:baseline;padding:4px 8px 0;font-size:13px">
+          <span id="diff-loss" style="margin-right:8px"></span>
+          <span style="color:#aaa;font-weight:600;flex:1;text-align:center">Training Loss</span>
+          <span id="diff-time" style="margin-left:8px"></span>
+        </div>
+        <div id="chart-loss"></div>
+      </div>
       <div class="chart-box"><div id="chart-time"></div></div>
       <div class="chart-box"><div id="chart-bpb"></div></div>
     </div>
@@ -296,7 +303,7 @@ function startLiveView(podId) {
   // Init charts
   Plotly.newPlot('chart-loss', [
     { x: [], y: [], name: 'train_loss', type: 'scatter', line: { color: '#ffd166' } }
-  ], { ...plotLayout, title: 'Training Loss', height: 240 }, plotConfig);
+  ], { ...plotLayout, height: 220 }, plotConfig);
 
   Plotly.newPlot('chart-time', [
     { x: [], y: [], name: 'step_avg', type: 'scatter', line: { color: '#48dbfb' } }
@@ -331,6 +338,7 @@ function startLiveView(podId) {
     document.getElementById('info-step').textContent = `Step: ${m.step}/${m.total_steps}`;
     document.getElementById('info-avg').textContent = `Avg: ${m.step_avg_ms.toFixed(1)} ms`;
     if (m.train_loss > 0) document.getElementById('info-loss').textContent = `Loss: ${m.train_loss.toFixed(4)}`;
+    updateBaselineDiffs(m);
   });
 
   eventSource.addEventListener('memory', e => {
@@ -352,6 +360,7 @@ function startLiveView(podId) {
 
 // ── Baseline ──
 let baselineRunId = null;
+let baselineByStep = {};  // step → {train_loss, step_avg_ms, train_time_ms, val_bpb}
 
 async function loadBaselineOptions(currentPodId) {
   const sel = document.getElementById('baseline-select');
@@ -382,10 +391,18 @@ async function onBaselineChange() {
   }
 
   baselineRunId = runId || null;
+  baselineByStep = {};
+  document.getElementById('diff-loss').innerHTML = '';
+  document.getElementById('diff-time').innerHTML = '';
+
   if (!runId) return;
 
-  // Fetch baseline metrics
+  // Fetch baseline metrics and build step lookup
   const metrics = await fetch(`/api/runs/${runId}/metrics`).then(r => r.json());
+  for (const m of metrics) {
+    baselineByStep[m.step] = m;
+  }
+
   const trainSteps = metrics.filter(m => m.train_loss).map(m => m.step);
   const trainLoss = metrics.filter(m => m.train_loss).map(m => m.train_loss);
   const timeSteps = metrics.map(m => m.step);
@@ -405,6 +422,54 @@ async function onBaselineChange() {
   if (valSteps.length) {
     Plotly.addTraces('chart-bpb', { x: valSteps, y: valBpb, name: 'baseline', mode: 'markers', type: 'scatter', marker: { color: baseColor, size: 6, symbol: 'diamond-open' } });
   }
+}
+
+function updateBaselineDiffs(m) {
+  // Find the closest baseline step at or below the current step
+  if (!baselineRunId || !Object.keys(baselineByStep).length) {
+    document.getElementById('diff-loss').innerHTML = '';
+    document.getElementById('diff-time').innerHTML = '';
+    return;
+  }
+
+  const bSteps = Object.keys(baselineByStep).map(Number).sort((a,b) => a-b);
+  let bStep = null;
+  for (let i = bSteps.length - 1; i >= 0; i--) {
+    if (bSteps[i] <= m.step) { bStep = bSteps[i]; break; }
+  }
+  if (bStep == null) return;
+
+  const b = baselineByStep[bStep];
+  const diffEl = document.getElementById('diff-loss');
+  const timeEl = document.getElementById('diff-time');
+
+  // Loss diff (negative = better)
+  if (m.train_loss > 0 && b.train_loss) {
+    const d = m.train_loss - b.train_loss;
+    const sign = d > 0 ? '+' : '';
+    const color = d <= 0 ? '#4ade80' : '#ff6b6b';
+    diffEl.innerHTML = `<span style="color:${color};font-weight:600">(${sign}${d.toFixed(4)})</span>`;
+  }
+
+  // Time diffs: step_avg diff + wall-clock diff from train_time
+  let parts = [];
+  if (m.step_avg_ms && b.step_avg_ms) {
+    const dAvg = m.step_avg_ms - b.step_avg_ms;
+    const sign = dAvg > 0 ? '+' : '';
+    const color = dAvg <= 0 ? '#4ade80' : '#ff6b6b';
+    parts.push(`<span style="color:${color}">${sign}${dAvg.toFixed(1)}ms</span>`);
+  }
+  if (m.train_time_ms && b.train_time_ms) {
+    const dWall = m.train_time_ms - b.train_time_ms;
+    const absSec = Math.abs(dWall / 1000);
+    let timeStr;
+    if (absSec >= 60) { timeStr = `${(absSec/60).toFixed(1)}m`; }
+    else { timeStr = `${absSec.toFixed(1)}s`; }
+    const color = dWall <= 0 ? '#4ade80' : '#ff6b6b';
+    const label = dWall <= 0 ? 'ahead' : 'behind';
+    parts.push(`<span style="color:${color}">${timeStr} ${label}</span>`);
+  }
+  timeEl.innerHTML = parts.join('<span style="color:#555"> / </span>');
 }
 
 // ── Stop ──
