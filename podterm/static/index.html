@@ -281,7 +281,7 @@ function startLiveView(podId) {
   const gpuName = gpus.length ? gpus[0].gpuDisplayName : (pod.machine||{}).gpuDisplayName || pod.gpu || '-';
   const cost = pod.costPerHr || '?';
   document.getElementById('live-info').innerHTML =
-    `<span>GPU: ${gpuName}</span><span>$/hr: ${cost}</span><span id="info-step">Step: -</span><span id="info-avg">Avg: -</span><span id="info-loss">Loss: -</span><span id="info-bpb">BPB: -</span><span id="info-mem">Mem: -</span>`;
+    `<span>GPU: ${gpuName}</span><span>$/hr: ${cost}</span><span id="info-step">Step: -</span><span id="info-avg">Avg: -</span><span id="info-loss">Loss: -</span><span id="info-bpb">BPB: -</span><span id="info-mem">Mem: -</span><a href="/api/runs/${podId}/log" target="_blank" style="color:#4a9eff;text-decoration:none;font-size:12px;margin-left:auto">Full Log</a>`;
 
   // Init charts
   Plotly.newPlot('chart-loss', [
@@ -475,7 +475,7 @@ function renderHistoryTable() {
   const area = document.getElementById('history-table-area');
   if (!runs.length) { area.innerHTML = '<div class="placeholder">No runs found.</div>'; return; }
 
-  let html = '<table><thead><tr><th></th><th>Date</th><th>Branch</th><th>Commit</th><th>GPU</th><th>Variant</th><th>Steps</th><th>Best BPB</th><th>Cost</th><th>Status</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th></th><th>Date</th><th>Branch</th><th>Commit</th><th>GPU</th><th>Variant</th><th>Steps</th><th>Best BPB</th><th>Cost</th><th>Status</th><th></th></tr></thead><tbody>';
   for (const r of runs) {
     const checked = selectedRuns.has(r.run_id) ? 'checked' : '';
     const date = (r.started_at||'').slice(0,16).replace('T',' ');
@@ -491,6 +491,7 @@ function renderHistoryTable() {
       <td><input type="checkbox" ${checked} onchange="toggleRun('${r.run_id}', this.checked)"></td>
       <td>${date}</td><td>${r.branch||'-'}</td><td>${commit}</td><td>${r.gpu_type||'-'}</td>
       <td>${r.data_variant||'-'}</td><td>${r.total_steps||'-'}</td><td>${bpb}</td><td>${cost}</td><td>${status}</td>
+      <td><a href="/api/runs/${r.run_id}/log" target="_blank" style="color:#4a9eff;text-decoration:none;font-size:11px">log</a></td>
     </tr>`;
   }
   html += '</tbody></table>';

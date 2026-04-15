@@ -439,6 +439,45 @@ async def run_filters():
 
 
 # ---------------------------------------------------------------------------
+# Log file access
+# ---------------------------------------------------------------------------
+
+_LOG_DIR = os.path.join(os.getcwd(), ".cache", "logs")
+
+
+def _find_log_file(run_id: str) -> str | None:
+    """Find the log file for a run by checking pod_name and pod_id patterns."""
+    run = db.get_run(run_id)
+    candidates = []
+    if run:
+        candidates.append(run.get("pod_name", ""))
+    candidates.append(run_id)
+
+    for d in [_LOG_DIR, os.path.join(os.getcwd(), ".local", "examples")]:
+        for name in candidates:
+            if not name:
+                continue
+            path = os.path.join(d, f"{name}.log")
+            if os.path.isfile(path):
+                return path
+        # Also check all files in the directory for a matching pod_id inside
+        if os.path.isdir(d):
+            for fname in os.listdir(d):
+                if fname.endswith(".log") and run_id in fname:
+                    return os.path.join(d, fname)
+    return None
+
+
+@app.get("/api/runs/{run_id}/log")
+async def get_run_log(run_id: str):
+    """Serve the full raw log file for a run."""
+    path = await asyncio.to_thread(_find_log_file, run_id)
+    if not path:
+        return {"error": "Log file not found", "run_id": run_id}
+    return FileResponse(path, media_type="text/plain", filename=os.path.basename(path))
+
+
+# ---------------------------------------------------------------------------
 # Log file import
 # ---------------------------------------------------------------------------
 
