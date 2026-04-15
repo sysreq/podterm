@@ -127,6 +127,12 @@
   <div id="tab-live" class="tab-content active">
     <div id="live-placeholder" class="placeholder">Select a running pod or launch a new experiment.</div>
     <div id="live-info" style="display:none"></div>
+    <div id="live-baseline" style="display:none;margin-bottom:8px">
+      <label style="font-size:12px;color:#888;margin-right:8px">Baseline:</label>
+      <select id="baseline-select" onchange="onBaselineChange()" style="padding:4px 8px;background:#16213e;border:1px solid #2a2a4a;border-radius:6px;color:#e0e0e0;font-size:12px;width:300px">
+        <option value="">None</option>
+      </select>
+    </div>
     <div id="live-charts" style="display:none">
       <div class="chart-box chart-wide"><div id="chart-loss"></div></div>
       <div class="chart-box"><div id="chart-time"></div></div>
@@ -270,9 +276,13 @@ function startLiveView(podId) {
 
   document.getElementById('live-placeholder').style.display = 'none';
   document.getElementById('live-info').style.display = 'flex';
+  document.getElementById('live-baseline').style.display = 'flex';
   document.getElementById('live-charts').style.display = 'grid';
   document.getElementById('log-viewer').style.display = 'block';
   document.getElementById('log-viewer').textContent = '';
+
+  // Populate baseline selector from history
+  loadBaselineOptions(podId);
 
   // Find pod info
   const pod = pods.find(p => p.id === podId) || {};
@@ -331,12 +341,70 @@ function startLiveView(podId) {
   eventSource.addEventListener('phase', e => {
     const d = JSON.parse(e.data);
     if (d.phase && d.phase.includes('Starting Training')) {
-      // Clear chart data on restart, but keep log and SSE connection
-      Plotly.restyle('chart-loss', { x: [[]], y: [[]] });
-      Plotly.restyle('chart-time', { x: [[]], y: [[]] });
-      Plotly.restyle('chart-bpb', { x: [[]], y: [[]] });
+      // Clear live data (trace 0) on restart, but keep log and SSE connection
+      Plotly.restyle('chart-loss', { x: [[]], y: [[]] }, [0]);
+      Plotly.restyle('chart-time', { x: [[]], y: [[]] }, [0]);
+      Plotly.restyle('chart-bpb', { x: [[]], y: [[]] }, [0]);
+      // Re-apply baseline if selected (it's still in trace 1)
     }
   });
+}
+
+// ── Baseline ──
+let baselineRunId = null;
+
+async function loadBaselineOptions(currentPodId) {
+  const sel = document.getElementById('baseline-select');
+  sel.innerHTML = '<option value="">None</option>';
+  try {
+    const runs = await fetch('/api/runs?limit=30').then(r => r.json());
+    for (const r of runs) {
+      if (r.run_id === currentPodId) continue; // skip self
+      if (!r.total_steps) continue; // skip runs with no data
+      const bpb = r.best_val_bpb != null ? ` | BPB ${r.best_val_bpb.toFixed(4)}` : '';
+      const label = `${r.pod_name||r.run_id} (${r.branch||'?'}${bpb})`;
+      const opt = document.createElement('option');
+      opt.value = r.run_id;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+  } catch(e) {}
+}
+
+async function onBaselineChange() {
+  const runId = document.getElementById('baseline-select').value;
+
+  // Remove existing baseline traces (always index 1 if present)
+  if (baselineRunId) {
+    try { Plotly.deleteTraces('chart-loss', [1]); } catch(e) {}
+    try { Plotly.deleteTraces('chart-time', [1]); } catch(e) {}
+    try { Plotly.deleteTraces('chart-bpb', [1]); } catch(e) {}
+  }
+
+  baselineRunId = runId || null;
+  if (!runId) return;
+
+  // Fetch baseline metrics
+  const metrics = await fetch(`/api/runs/${runId}/metrics`).then(r => r.json());
+  const trainSteps = metrics.filter(m => m.train_loss).map(m => m.step);
+  const trainLoss = metrics.filter(m => m.train_loss).map(m => m.train_loss);
+  const timeSteps = metrics.map(m => m.step);
+  const stepAvg = metrics.map(m => m.step_avg_ms);
+  const valSteps = metrics.filter(m => m.val_bpb != null).map(m => m.step);
+  const valBpb = metrics.filter(m => m.val_bpb != null).map(m => m.val_bpb);
+
+  const dash = { dash: 'dash' };
+  const baseColor = 'rgba(255,255,255,0.35)';
+
+  if (trainSteps.length) {
+    Plotly.addTraces('chart-loss', { x: trainSteps, y: trainLoss, name: 'baseline', type: 'scatter', line: { color: baseColor, ...dash } });
+  }
+  if (timeSteps.length) {
+    Plotly.addTraces('chart-time', { x: timeSteps, y: stepAvg, name: 'baseline', type: 'scatter', line: { color: baseColor, ...dash } });
+  }
+  if (valSteps.length) {
+    Plotly.addTraces('chart-bpb', { x: valSteps, y: valBpb, name: 'baseline', mode: 'markers', type: 'scatter', marker: { color: baseColor, size: 6, symbol: 'diamond-open' } });
+  }
 }
 
 // ── Stop ──

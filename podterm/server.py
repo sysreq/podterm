@@ -420,6 +420,11 @@ async def list_runs(branch: str | None = None, gpu: str | None = None, limit: in
     return db.list_runs(limit=limit, branch=branch, gpu=gpu)
 
 
+@app.get("/api/runs/{run_id}/metrics")
+async def get_run_metrics(run_id: str):
+    return db.get_metrics(run_id)
+
+
 @app.post("/api/compare")
 async def compare_runs(body: dict):
     run_ids = body.get("run_ids", [])
