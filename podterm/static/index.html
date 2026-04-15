@@ -331,9 +331,10 @@ function startLiveView(podId) {
   eventSource.addEventListener('phase', e => {
     const d = JSON.parse(e.data);
     if (d.phase && d.phase.includes('Starting Training')) {
-      // Clear charts on restart
-      Plotly.purge('chart-loss'); Plotly.purge('chart-time'); Plotly.purge('chart-bpb');
-      startLiveView(podId);
+      // Clear chart data on restart, but keep log and SSE connection
+      Plotly.restyle('chart-loss', { x: [[]], y: [[]] });
+      Plotly.restyle('chart-time', { x: [[]], y: [[]] });
+      Plotly.restyle('chart-bpb', { x: [[]], y: [[]] });
     }
   });
 }
