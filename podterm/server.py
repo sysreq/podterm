@@ -65,6 +65,9 @@ ssh_threads: dict[str, SshTailThread] = {}
 sse_subscribers: dict[str, list[asyncio.Queue]] = {}  # pod_id → client queues
 last_launch_config: dict | None = None
 
+# Serialises SSH thread creation and template+pod-create to prevent races
+_launch_lock = threading.Lock()
+
 # Per-run state accumulators
 run_memory: dict[str, MemoryInfo] = {}
 run_summary: dict[str, RunSummary] = {}
@@ -156,6 +159,16 @@ def _sse_send(pod_id: str, event_type: str, data: dict) -> None:
             dead.append(q)
     for q in dead:
         clients.remove(q)
+        # Drain and send sentinel so the generator exits and EventSource reconnects
+        while not q.empty():
+            try:
+                q.get_nowait()
+            except Exception:
+                break
+        try:
+            q.put_nowait(None)
+        except Exception:
+            pass
 
 
 def _finalize_run(pod_id: str) -> None:
@@ -170,15 +183,16 @@ def _finalize_run(pod_id: str) -> None:
 
 def _connect_pod(pod_id: str, pod_name: str, cost_per_hr=None) -> None:
     """Start SSH streaming for a pod if not already connected."""
-    if pod_id in ssh_threads:
-        return
-    try:
-        db.create_run(pod_id, pod_name, {"gpu": "", "cost_per_hr": cost_per_hr})
-    except Exception:
-        pass
-    thread = SshTailThread(pod_id, pod_name, log_queue)
-    ssh_threads[pod_id] = thread
-    thread.start()
+    with _launch_lock:
+        if pod_id in ssh_threads:
+            return
+        try:
+            db.create_run(pod_id, pod_name, {"gpu": "", "cost_per_hr": cost_per_hr})
+        except Exception:
+            pass
+        thread = SshTailThread(pod_id, pod_name, log_queue)
+        ssh_threads[pod_id] = thread
+        thread.start()
 
 
 # ---------------------------------------------------------------------------
@@ -314,21 +328,26 @@ async def launch_pod(cfg: LaunchConfig):
             env["PUBLIC_KEY"] = pubkey
 
         network_vol = get_network_volume(cfg.datacenter)
-        tpl = create_or_update_template(DEFAULT_IMAGE, env)
-        pod = api_create_pod(
-            pod_name, cfg.gpu, tpl,
-            DEFAULT_CLOUD_TYPE, cfg.datacenter, network_vol,
-            gpu_count=cfg.gpu_count,
-        )
-        pod_id = pod["id"]
-        cost = pod.get("costPerHr", 0)
-        cfg_dict["cost_per_hr"] = cost
 
-        db.create_run(pod_id, pod_name, cfg_dict)
+        # Hold the lock across template update + pod create so concurrent
+        # launches don't clobber each other's template env vars, and across
+        # ssh_threads assignment so refreshPods() can't create a duplicate.
+        with _launch_lock:
+            tpl = create_or_update_template(DEFAULT_IMAGE, env)
+            pod = api_create_pod(
+                pod_name, cfg.gpu, tpl,
+                DEFAULT_CLOUD_TYPE, cfg.datacenter, network_vol,
+                gpu_count=cfg.gpu_count,
+            )
+            pod_id = pod["id"]
+            cost = pod.get("costPerHr", 0)
+            cfg_dict["cost_per_hr"] = cost
 
-        thread = SshTailThread(pod_id, pod_name, log_queue)
-        ssh_threads[pod_id] = thread
-        thread.start()
+            db.create_run(pod_id, pod_name, cfg_dict)
+
+            thread = SshTailThread(pod_id, pod_name, log_queue)
+            ssh_threads[pod_id] = thread
+            thread.start()
 
         return {"pod_id": pod_id, "name": pod_name, "cost_per_hr": cost}
 
@@ -339,7 +358,8 @@ async def launch_pod(cfg: LaunchConfig):
 async def stop_pod(pod_id: str):
     def _stop():
         api_terminate_pod(pod_id)
-        thread = ssh_threads.pop(pod_id, None)
+        with _launch_lock:
+            thread = ssh_threads.pop(pod_id, None)
         if thread:
             thread.stop()
         _finalize_run(pod_id)
@@ -362,6 +382,8 @@ async def stream_pod(pod_id: str):
             yield ": connected\n\n"
             while True:
                 msg = await client_queue.get()
+                if msg is None:
+                    return  # Sentinel: server ejected us (queue overflow)
                 yield msg
         except asyncio.CancelledError:
             pass
