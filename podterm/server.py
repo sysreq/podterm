@@ -436,3 +436,165 @@ async def run_filters():
         "branches": db.get_distinct_branches(),
         "gpus": db.get_distinct_gpus(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Log file import
+# ---------------------------------------------------------------------------
+
+import re
+from glob import glob
+
+_RE_LOG_POD_ID = re.compile(r"==> Logging to /workspace/logs/(\S+)\.log")
+_RE_LOG_POD_NAME = re.compile(r"Waiting for pod ([\w-]+)")
+
+# Directories to scan for .log files
+_LOG_DIRS = [
+    os.path.join(os.getcwd(), ".cache", "logs"),
+    os.path.join(os.getcwd(), ".local", "examples"),
+]
+
+
+def _scan_log_files() -> list[dict]:
+    """Find all .log files and check which are already imported."""
+    existing = {r["run_id"] for r in db.list_runs(limit=10000)}
+    files = []
+    for d in _LOG_DIRS:
+        for path in sorted(glob(os.path.join(d, "*.log"))):
+            name = os.path.basename(path)
+            # Quick scan first line for pod name
+            pod_name = name.removesuffix(".log")
+            # Check if already imported (by filename-based ID)
+            imported = pod_name in existing
+            # Also check by scanning for real pod_id inside the file
+            if not imported:
+                try:
+                    with open(path) as f:
+                        for line in f:
+                            m = _RE_LOG_POD_ID.search(line)
+                            if m:
+                                if m.group(1) in existing:
+                                    imported = True
+                                break
+                            if f.tell() > 2000:
+                                break
+                except Exception:
+                    pass
+            files.append({
+                "path": path,
+                "name": name,
+                "size": os.path.getsize(path),
+                "imported": imported,
+            })
+    return files
+
+
+def _import_log_file(path: str) -> dict:
+    """Parse a log file and insert its run + metrics into the DB."""
+    filename = os.path.basename(path).removesuffix(".log")
+
+    # First pass: extract pod_id, pod_name, and metadata
+    pod_id = filename  # fallback
+    pod_name = filename
+    commit_info = None
+    model_info = None
+    memory_info = None
+    summary_info = None
+    exit_code = None
+    gpu_type = None
+    metrics: list[StepMetric] = []
+
+    with open(path) as f:
+        for line in f:
+            line = line.rstrip()
+
+            # Extract real pod_id from log path
+            m = _RE_LOG_POD_ID.search(line)
+            if m:
+                pod_id = m.group(1)
+
+            # Extract pod name
+            m = _RE_LOG_POD_NAME.search(line)
+            if m:
+                pod_name = m.group(1)
+
+            # Extract GPU from nvidia-smi output
+            if "NVIDIA" in line and "GB" in line and not gpu_type:
+                # Lines like: |   0  NVIDIA H100 80GB HBM3 ...
+                gpu_match = re.search(r"(NVIDIA\s+\S+\s+\S+\s+\S+)", line)
+                if gpu_match:
+                    gpu_type = gpu_match.group(1).strip()
+
+            event = parse_line(line)
+            if isinstance(event, StepMetric):
+                metrics.append(event)
+            elif isinstance(event, CommitInfo):
+                commit_info = event
+            elif isinstance(event, ModelInfo):
+                model_info = event
+            elif isinstance(event, MemoryInfo):
+                memory_info = event
+            elif isinstance(event, RunSummary):
+                summary_info = event
+            elif isinstance(event, PhaseMarker) and event.exit_code is not None:
+                exit_code = event.exit_code
+
+    # Get file modification time as approximate start time
+    mtime = os.path.getmtime(path)
+    from datetime import datetime, timezone
+    started_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
+    # Create run
+    config = {"branch": "main", "gpu": gpu_type or ""}
+    db.create_run(pod_id, pod_name, config)
+    db.update_run(pod_id, started_at=started_at, gpu_type=gpu_type)
+
+    if commit_info:
+        db.update_run(pod_id, commit_hash=commit_info.hash, commit_msg=commit_info.message)
+    if model_info:
+        db.update_run(pod_id, model_params=model_info.params)
+
+    # Insert metrics
+    if metrics:
+        db.add_metrics_batch(pod_id, metrics)
+
+    # Finalize
+    db.finish_run(pod_id, summary=summary_info, memory=memory_info, exit_code=exit_code)
+
+    return {
+        "run_id": pod_id,
+        "pod_name": pod_name,
+        "metrics": len(metrics),
+        "gpu": gpu_type,
+        "best_val_bpb": summary_info.best_val_bpb if summary_info else None,
+    }
+
+
+@app.get("/api/logs")
+async def list_log_files():
+    return await asyncio.to_thread(_scan_log_files)
+
+
+@app.post("/api/logs/import")
+async def import_log(body: dict):
+    path = body.get("path", "")
+    if not path or not os.path.isfile(path):
+        return {"error": "File not found"}
+    return await asyncio.to_thread(_import_log_file, path)
+
+
+@app.post("/api/logs/import-all")
+async def import_all_logs():
+    def _import_all():
+        files = _scan_log_files()
+        results = []
+        for f in files:
+            if f["imported"]:
+                continue
+            try:
+                r = _import_log_file(f["path"])
+                results.append(r)
+            except Exception as e:
+                results.append({"path": f["path"], "error": str(e)})
+        return {"imported": len(results), "results": results}
+    return await asyncio.to_thread(_import_all)

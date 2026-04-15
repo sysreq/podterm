@@ -134,6 +134,8 @@
       <button onclick="compareSelected()">Compare Selected</button>
       <button onclick="clearSelection()">Clear</button>
       <span id="selection-count">0 selected</span>
+      <span style="margin-left: auto"></span>
+      <button onclick="openImportDialog()">Import Logs</button>
     </div>
     <div id="history-table-area"></div>
   </div>
@@ -181,6 +183,17 @@
   <div class="btn-row">
     <button class="primary" onclick="doLaunch()">Launch</button>
     <button onclick="document.getElementById('launch-dialog').close()">Cancel</button>
+  </div>
+</dialog>
+
+<!-- Import Logs Dialog -->
+<dialog id="import-dialog">
+  <h3>Import Log Files</h3>
+  <p style="font-size:12px;color:#888;margin-bottom:12px">Scan .cache/logs/ and .local/examples/ for training logs to import into the database.</p>
+  <div id="import-list" style="max-height:400px;overflow-y:auto"></div>
+  <div class="btn-row">
+    <button class="primary" onclick="importAllLogs()">Import All</button>
+    <button onclick="document.getElementById('import-dialog').close()">Close</button>
   </div>
 </dialog>
 
@@ -536,6 +549,61 @@ async function compareSelected() {
   }
   summaryHtml += '</tbody></table>';
   document.getElementById('compare-summary').innerHTML = summaryHtml;
+}
+
+// ── Import Logs ──
+async function openImportDialog() {
+  const dlg = document.getElementById('import-dialog');
+  const list = document.getElementById('import-list');
+  list.innerHTML = '<div class="placeholder">Scanning...</div>';
+  dlg.showModal();
+
+  const files = await fetch('/api/logs').then(r => r.json());
+  if (!files.length) {
+    list.innerHTML = '<div class="placeholder">No log files found.</div>';
+    return;
+  }
+
+  let html = '<table><thead><tr><th>File</th><th>Size</th><th>Status</th><th></th></tr></thead><tbody>';
+  for (const f of files) {
+    const size = (f.size / 1024).toFixed(1) + ' KB';
+    const status = f.imported ? '<span style="color:#4ade80">imported</span>' : '<span style="color:#888">new</span>';
+    const btn = f.imported ? '' : `<button onclick="importSingleLog('${f.path.replace(/'/g,"\\'")}', this)" style="padding:4px 12px;font-size:11px">Import</button>`;
+    html += `<tr><td style="font-size:11px">${f.name}</td><td>${size}</td><td>${status}</td><td>${btn}</td></tr>`;
+  }
+  html += '</tbody></table>';
+  list.innerHTML = html;
+}
+
+async function importSingleLog(path, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    const r = await fetch('/api/logs/import', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ path })
+    });
+    const result = await r.json();
+    if (result.error) { btn.textContent = 'Error'; return; }
+    btn.parentElement.previousElementSibling.innerHTML = '<span style="color:#4ade80">imported</span>';
+    btn.textContent = `${result.metrics} metrics`;
+    btn.style.border = '1px solid #4ade80';
+    loadHistory();
+  } catch(e) { btn.textContent = 'Failed'; }
+}
+
+async function importAllLogs() {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  try {
+    const r = await fetch('/api/logs/import-all', { method: 'POST' });
+    const result = await r.json();
+    btn.textContent = `Imported ${result.imported} logs`;
+    btn.style.border = '1px solid #4ade80';
+    openImportDialog(); // refresh the list
+    loadHistory();
+  } catch(e) { btn.textContent = 'Failed'; }
 }
 
 // ── Init ──
