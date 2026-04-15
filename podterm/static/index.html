@@ -88,6 +88,14 @@
   dialog .chk-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   dialog .chk-row input[type=checkbox] { width: auto; }
 
+  /* Compare selection chips */
+  #compare-selection { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; align-items: center; }
+  #compare-selection span { font-size: 12px; color: #888; }
+  .run-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #16213e;
+    border: 1px solid #2a2a4a; border-radius: 16px; font-size: 12px; }
+  .run-chip .chip-x { cursor: pointer; color: #888; font-size: 14px; line-height: 1; }
+  .run-chip .chip-x:hover { color: #ff6b6b; }
+
   /* Placeholder */
   .placeholder { color: #555; text-align: center; padding: 60px 0; font-size: 14px; }
 
@@ -143,6 +151,7 @@
   <!-- Compare Tab -->
   <div id="tab-compare" class="tab-content">
     <div id="compare-placeholder" class="placeholder">Select runs from History tab, then click Compare.</div>
+    <div id="compare-selection" style="display:none"></div>
     <div id="compare-charts"></div>
     <div id="compare-summary"></div>
   </div>
@@ -500,16 +509,59 @@ function clearSelection() {
 }
 
 // ── Compare ──
+let lastCompareData = null; // cached for re-render on chip removal
+
 async function compareSelected() {
   if (selectedRuns.size < 2) { alert('Select at least 2 runs.'); return; }
   switchTab('compare');
-  document.getElementById('compare-placeholder').style.display = 'none';
 
   const r = await fetch('/api/compare', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ run_ids: [...selectedRuns] })
   });
-  const data = await r.json();
+  lastCompareData = await r.json();
+  renderComparison();
+}
+
+function removeFromComparison(runId) {
+  selectedRuns.delete(runId);
+  document.getElementById('selection-count').textContent = `${selectedRuns.size} selected`;
+  if (selectedRuns.size < 2) {
+    // Not enough runs left — clear comparison
+    document.getElementById('compare-selection').style.display = 'none';
+    document.getElementById('compare-charts').innerHTML = '';
+    document.getElementById('compare-summary').innerHTML = '';
+    document.getElementById('compare-placeholder').style.display = '';
+    document.getElementById('compare-placeholder').textContent = 'Select at least 2 runs from the History tab.';
+    lastCompareData = null;
+    renderHistoryTable(); // update checkboxes
+    return;
+  }
+  // Remove from cached data and re-render
+  if (lastCompareData) {
+    delete lastCompareData.metrics[runId];
+    delete lastCompareData.runs[runId];
+    renderComparison();
+  }
+  renderHistoryTable(); // sync checkboxes
+}
+
+function renderComparison() {
+  const data = lastCompareData;
+  if (!data) return;
+
+  document.getElementById('compare-placeholder').style.display = 'none';
+
+  // Selection chips
+  const selEl = document.getElementById('compare-selection');
+  selEl.style.display = 'flex';
+  let chipsHtml = '<span>Comparing:</span>';
+  for (const rid of Object.keys(data.runs)) {
+    const run = data.runs[rid] || {};
+    const label = `${run.branch||''}@${(run.commit_hash||'').slice(0,7)}`;
+    chipsHtml += `<div class="run-chip"><span>${label}</span><span class="chip-x" onclick="removeFromComparison('${rid}')">&times;</span></div>`;
+  }
+  selEl.innerHTML = chipsHtml;
 
   // Loss comparison chart
   const lossTraces = [];
