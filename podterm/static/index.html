@@ -224,6 +224,21 @@ let historyRuns = [];
 let selectedRuns = new Set();
 let variantLookup = {};
 const COLORS = ['#ffd166','#ff6b6b','#48dbfb','#81ecec','#a29bfe','#fd79a8'];
+
+// Piecewise-linear loss scale: 8→4 gets ⅓ of height, 4→3.5 gets ⅓, 3.5→3 gets ⅓
+function scaleY(loss) {
+  if (loss >= 4)   return 2/3 + (loss - 4) / 4 * (1/3);
+  if (loss >= 3.5) return 1/3 + (loss - 3.5) / 0.5 * (1/3);
+  return (loss - 3) / 0.5 * (1/3);
+}
+const lossTicks = [3, 3.25, 3.5, 3.75, 4, 5, 6, 8, 10];
+const lossYAxis = {
+  gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a',
+  tickvals: lossTicks.map(scaleY),
+  ticktext: lossTicks.map(v => v % 1 === 0 ? String(v) : v.toFixed(2)),
+};
+const lossHover = 'Step %{x}<br>Loss: %{customdata:.4f}<extra></extra>';
+
 const plotLayout = {
   paper_bgcolor: '#16213e', plot_bgcolor: '#16213e', font: { color: '#aaa', size: 11 },
   margin: { l: 50, r: 20, t: 30, b: 35 }, legend: { orientation: 'h', y: -0.15 },
@@ -298,8 +313,8 @@ function startLiveView(podId) {
 
   // Init charts
   Plotly.newPlot('chart-loss', [
-    { x: [], y: [], name: 'train_loss', type: 'scatter', line: { color: '#ffd166' } }
-  ], { ...plotLayout, height: 400 }, plotConfig);
+    { x: [], y: [], customdata: [], name: 'train_loss', type: 'scatter', line: { color: '#ffd166' }, hovertemplate: lossHover }
+  ], { ...plotLayout, yaxis: lossYAxis, height: 400 }, plotConfig);
 
   // Connect SSE
   eventSource = new EventSource(`/api/stream/${podId}`);
@@ -316,7 +331,7 @@ function startLiveView(podId) {
   eventSource.addEventListener('metric', e => {
     const m = JSON.parse(e.data);
     if (m.train_loss && m.train_loss > 0) {
-      Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[m.train_loss]] }, [0]);
+      Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[scaleY(m.train_loss)]], customdata: [[m.train_loss]] }, [0]);
     }
     if (m.val_bpb != null) {
       document.getElementById('info-bpb').textContent = `BPB: ${m.val_bpb.toFixed(4)}`;
@@ -336,7 +351,7 @@ function startLiveView(podId) {
     const d = JSON.parse(e.data);
     if (d.phase && d.phase.includes('Starting Training')) {
       // Clear live data (trace 0) on restart, but keep log and SSE connection
-      Plotly.restyle('chart-loss', { x: [[]], y: [[]] }, [0]);
+      Plotly.restyle('chart-loss', { x: [[]], y: [[]], customdata: [[]] }, [0]);
       // Re-apply baseline if selected (it's still in trace 1)
     }
   });
@@ -385,12 +400,14 @@ async function onBaselineChange() {
     baselineByStep[m.step] = m;
   }
 
-  const trainSteps = metrics.filter(m => m.train_loss).map(m => m.step);
-  const trainLoss = metrics.filter(m => m.train_loss).map(m => m.train_loss);
+  const baselineMetrics = metrics.filter(m => m.train_loss);
+  const trainSteps = baselineMetrics.map(m => m.step);
+  const trainLoss = baselineMetrics.map(m => scaleY(m.train_loss));
+  const trainLossRaw = baselineMetrics.map(m => m.train_loss);
   const baseColor = 'rgba(255,255,255,0.35)';
 
   if (trainSteps.length) {
-    Plotly.addTraces('chart-loss', { x: trainSteps, y: trainLoss, name: 'baseline', type: 'scatter', line: { color: baseColor, dash: 'dash' } });
+    Plotly.addTraces('chart-loss', { x: trainSteps, y: trainLoss, customdata: trainLossRaw, name: 'baseline', type: 'scatter', line: { color: baseColor, dash: 'dash' }, hovertemplate: lossHover });
   }
 }
 
@@ -677,10 +694,12 @@ function renderComparison() {
     const label = `${run.branch||''}@${(run.commit_hash||'').slice(0,7)}`;
     const color = COLORS[i % COLORS.length];
 
-    const trainSteps = metrics.filter(m => m.train_loss).map(m => m.step);
-    const trainLoss = metrics.filter(m => m.train_loss).map(m => m.train_loss);
+    const cmpMetrics = metrics.filter(m => m.train_loss);
+    const trainSteps = cmpMetrics.map(m => m.step);
+    const trainLoss = cmpMetrics.map(m => scaleY(m.train_loss));
+    const trainLossRaw = cmpMetrics.map(m => m.train_loss);
     if (trainSteps.length) {
-      lossTraces.push({ x: trainSteps, y: trainLoss, name: label, type: 'scatter', line: { color } });
+      lossTraces.push({ x: trainSteps, y: trainLoss, customdata: trainLossRaw, name: label, type: 'scatter', line: { color }, hovertemplate: lossHover });
     }
 
     const valSteps = metrics.filter(m => m.val_bpb != null).map(m => m.step);
@@ -693,7 +712,7 @@ function renderComparison() {
 
   const chartsEl = document.getElementById('compare-charts');
   chartsEl.innerHTML = '<div class="chart-box" id="cmp-loss"></div><div class="chart-box" id="cmp-bpb"></div>';
-  Plotly.newPlot('cmp-loss', lossTraces, { ...plotLayout, title: 'Training Loss Comparison', height: 300 }, plotConfig);
+  Plotly.newPlot('cmp-loss', lossTraces, { ...plotLayout, yaxis: lossYAxis, title: 'Training Loss Comparison', height: 300 }, plotConfig);
   Plotly.newPlot('cmp-bpb', bpbTraces, { ...plotLayout, title: 'Validation BPB Comparison', height: 300 }, plotConfig);
 
   // Summary table
