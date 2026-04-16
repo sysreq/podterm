@@ -411,7 +411,9 @@ function renderLiveView(podId) {
   // Populate baseline selector and restore saved selection
   loadBaselineOptions(podId);
 
-  // Restore baseline diffs
+  // Clear stale diffs from previously viewed pod, then restore if we have data
+  document.getElementById('diff-loss').innerHTML = '';
+  document.getElementById('diff-time').innerHTML = '';
   if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
 }
 

@@ -153,7 +153,9 @@ def finish_run(
     conn.execute(
         """UPDATE runs SET
             finished_at = ?, duration_seconds = ?, exit_code = ?, total_cost = ?, total_steps = ?,
-            best_val_bpb = ?, peak_memory_mib = ?, reserved_memory_mib = ?
+            best_val_bpb = COALESCE(?, best_val_bpb),
+            peak_memory_mib = COALESCE(?, peak_memory_mib),
+            reserved_memory_mib = COALESCE(?, reserved_memory_mib)
            WHERE run_id = ?""",
         (
             now,
