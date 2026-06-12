@@ -41,3 +41,5 @@ body {
            gap: var(--sp-3); height: var(--h-kpi); flex-shrink: 0; }
 #race-banner { height: var(--h-banner); flex-shrink: 0; }
 #baseline-row { height: var(--h-baseline); flex-shrink: 0; }
+#diag-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: var(--sp-3); height: var(--h-diag); flex-shrink: 0; }

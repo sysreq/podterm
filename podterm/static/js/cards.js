@@ -2,9 +2,9 @@
 // same fixed internal slots in every state so values appearing never reflow.
 import { attachSparkline } from './sparkline.js';
 
-export function kpiCard({ label, tooltip = '', hero = false, spark = false, bar = false }) {
+export function kpiCard({ label, tooltip = '', hero = false, spark = false, bar = false, variant = '' }) {
   const el = document.createElement('div');
-  el.className = 'kpi-card' + (hero ? ' hero' : '');
+  el.className = 'kpi-card' + (hero ? ' hero' : '') + (variant ? ` ${variant}` : '');
   el.innerHTML = `
     <div class="kpi-label"><span class="kpi-label-text"></span><span class="kpi-info" hidden>&#9432;</span></div>
     <div class="kpi-value"><span class="kpi-value-text"></span><span class="kpi-unit"></span></div>

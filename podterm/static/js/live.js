@@ -6,6 +6,7 @@ import { fmtInt, fmtMs, fmtDuration, fmtSecShort, fmtClock, fmtMoney, fmtDelta }
 import { kpiCard } from './cards.js';
 
 let cards = null;
+let diag = null;
 
 // ── KPI row ──
 function buildKpiRow() {
@@ -33,6 +34,45 @@ function buildKpiRow() {
     row.appendChild(cards[key].el);
   }
   cards.gpu.note('Awaiting emitter', { pending: true });
+
+  // Diagnostics row — 4 metrics await emitters in gpt-golf; Validation BPB is live.
+  const diagRow = document.getElementById('diag-row');
+  diag = {
+    attn: kpiCard({ label: 'Attention Entropy', variant: 'diag', spark: true,
+      tooltip: 'Mean attention entropy across layers, in bits — how spread out attention is' }),
+    grad: kpiCard({ label: 'Grad Norm', variant: 'diag', spark: true,
+      tooltip: 'L2 norm of the gradient — spikes flag training instability' }),
+    logit: kpiCard({ label: 'Logit Saturation', variant: 'diag', spark: true,
+      tooltip: 'Share of logits near the activation ceiling — high values mean squashed outputs' }),
+    loader: kpiCard({ label: 'Dataloader Wait', variant: 'diag', spark: true,
+      tooltip: 'Fraction of step time spent waiting on the dataloader instead of compute' }),
+    vbpb: kpiCard({ label: 'Validation BPB', variant: 'diag', spark: true,
+      tooltip: 'Bits per byte on the validation set at each eval — lower is better' }),
+  };
+  for (const key of ['attn', 'grad', 'logit', 'loader', 'vbpb']) {
+    diagRow.appendChild(diag[key].el);
+  }
+  for (const key of ['attn', 'grad', 'logit', 'loader']) {
+    diag[key].note('Awaiting emitter', { pending: true });
+  }
+}
+
+function updateDiagRow(state) {
+  if (!diag) return;
+  const ed = d.evalDelta(state.evals);
+  if (!ed) {
+    diag.vbpb.note('No eval completed yet…');
+    if (diag.vbpb.spark) diag.vbpb.spark([]);
+    return;
+  }
+  diag.vbpb.set({
+    value: ed.current.toFixed(4),
+    sub: ed.delta != null
+      ? `${ed.delta <= 0 ? '▼' : '▲'} ${Math.abs(ed.delta).toFixed(4)} vs prev eval`
+      : `First eval @ ${fmtInt(ed.step)}`,
+    subClass: ed.delta == null ? '' : (ed.delta <= 0 ? 'success' : 'danger'),
+  });
+  if (diag.vbpb.spark) diag.vbpb.spark(state.evals.map((e) => e.val_bpb));
 }
 
 function podGpuName(pod) {
@@ -185,6 +225,7 @@ function updateKpis(podId) {
   const running = pod.desiredStatus === 'RUNNING';
 
   updateMemCard(state, pod);
+  updateDiagRow(state);
 
   if (!m) {
     const waitMsg = state.finished ? 'Run finished — no metrics recorded'

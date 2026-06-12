@@ -96,6 +96,10 @@
                 padding: 1px 8px; margin-bottom: 2px; }
 .bar-meter { height: 6px; background: var(--bg-inset); border-radius: 3px; overflow: hidden; margin-top: 9px; }
 .bar-meter-fill { height: 100%; background: var(--accent); border-radius: 3px; width: 0%; transition: width 0.3s; }
+
+/* Diagnostics row variant: taller sparkline, roomier sub line */
+.kpi-card.diag .kpi-foot { height: 46px; min-height: 46px; }
+.kpi-card.diag .kpi-sub { margin-top: 4px; }
 #charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3);
               height: var(--h-chart); flex-shrink: 0; }
 #charts-row .chart-box { background: var(--bg-panel); border: 1px solid var(--border);
