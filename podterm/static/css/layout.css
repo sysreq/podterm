@@ -33,3 +33,10 @@ body {
 #main { grid-area: main; display: flex; flex-direction: column; overflow: hidden; }
 .tab-content { display: none; flex: 1; overflow-y: auto; padding: var(--sp-4); }
 .tab-content.active { display: flex; flex-direction: column; }
+
+/* Live view stack */
+#live-view { display: none; }
+#live-view.visible { display: flex; flex-direction: column; gap: var(--sp-3); }
+#kpi-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
+           gap: var(--sp-3); height: var(--h-kpi); flex-shrink: 0; }
+#live-baseline { display: flex; align-items: center; }

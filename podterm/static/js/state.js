@@ -39,9 +39,12 @@ function freshState() {
     finished: false,
     exitCode: null,
     lastMetric: null,
+    runRow: null, // /api/runs row for this pod (started_at, cost_per_hr, …)
     // Baseline comparison
     baselineRunId: null,
     baselineByStep: {},
+    baselineSteps: [],
+    baselineTotalTimeMs: null,
     baselineX: [],
     baselineY: [],
     baselineRaw: [],

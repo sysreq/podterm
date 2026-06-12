@@ -1,33 +1,18 @@
 // Sidebar ACTIVE RUNS cards: name, status badge, step/BPB stats, pace line.
 import { app, getPodState, on } from './state.js';
+import { baselineAtStep, paceDelta } from './derive.js';
+import { fmtInt, fmtDelta, fmtSecShort } from './format.js';
 
-function fmtInt(n) {
-  return n != null ? n.toLocaleString('en-US') : '?';
-}
-
-// Pace vs the run's selected baseline. Temporary inline math — moves to
-// derive.js with the KPI slice so all views share one computation.
+// Same derivation the hero card and race banner use.
 function paceInfo(state) {
-  if (!state || !state.baselineRunId || !state.lastMetric) return null;
-  const m = state.lastMetric;
-  const steps = Object.keys(state.baselineByStep).map(Number).sort((a, b) => a - b);
-  let bStep = null;
-  for (let i = steps.length - 1; i >= 0; i--) {
-    if (steps[i] <= m.step) { bStep = steps[i]; break; }
-  }
-  if (bStep == null) return null;
-  const b = state.baselineByStep[bStep];
-  if (!m.step_avg_ms || !b.step_avg_ms || !m.train_time_ms || !b.train_time_ms) return null;
-  const perStepMs = m.step_avg_ms - b.step_avg_ms;
-  const cumulativeMs = m.train_time_ms - b.train_time_ms;
-  return { perStepMs, cumulativeMs, ahead: cumulativeMs <= 0 };
+  if (!state || !state.baselineRunId || !state.lastMetric || !state.baselineSteps.length) return null;
+  const sample = baselineAtStep(state.baselineByStep, state.baselineSteps, state.lastMetric.step);
+  const p = paceDelta(state.lastMetric, sample);
+  return p ? { ...p, ahead: p.cumulativeMs <= 0 } : null;
 }
 
 function fmtPace(p) {
-  const sign = p.perStepMs > 0 ? '+' : '';
-  const sec = Math.abs(p.cumulativeMs / 1000);
-  const t = sec >= 60 ? `${(sec / 60).toFixed(1)}m` : `${sec.toFixed(1)}s`;
-  return `${sign}${p.perStepMs.toFixed(1)}ms (${t} ${p.ahead ? 'ahead' : 'behind'})`;
+  return `${fmtDelta(p.perStepMs, 1)}ms (${fmtSecShort(p.cumulativeMs)} ${p.ahead ? 'ahead' : 'behind'})`;
 }
 
 export function renderRunList(onSelect) {

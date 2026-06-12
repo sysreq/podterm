@@ -47,25 +47,27 @@
 <div id="main">
   <!-- Live Tab -->
   <div id="tab-live" class="tab-content active">
-    <div id="live-placeholder" class="placeholder">Select a running pod or launch a new experiment.</div>
-    <div id="live-info" style="display:none"></div>
-    <div id="live-baseline" style="display:none;margin-bottom:8px">
-      <label style="font-size:12px;color:var(--text-muted);margin-right:8px">Baseline:</label>
-      <select id="baseline-select" style="padding:4px 8px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:300px">
-        <option value="">None</option>
-      </select>
-    </div>
-    <div id="live-charts" style="display:none">
-      <div class="chart-box chart-wide">
-        <div id="chart-loss-header" style="display:flex;align-items:baseline;padding:4px 8px 0;font-size:13px">
-          <span id="diff-loss" style="margin-right:8px"></span>
-          <span style="color:var(--text-secondary);font-weight:600;flex:1;text-align:center">Training Loss</span>
-          <span id="diff-time" style="margin-left:8px"></span>
-        </div>
-        <div id="chart-loss"></div>
+    <div id="live-placeholder" class="placeholder">Select a run from the sidebar, or Launch Run to start one.</div>
+    <div id="live-view">
+      <div id="kpi-row"></div>
+      <div id="live-baseline">
+        <label style="font-size:12px;color:var(--text-muted);margin-right:8px">Baseline:</label>
+        <select id="baseline-select" style="padding:4px 8px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:300px">
+          <option value="">None</option>
+        </select>
       </div>
+      <div id="live-charts">
+        <div class="chart-box chart-wide">
+          <div id="chart-loss-header" style="display:flex;align-items:baseline;padding:4px 8px 0;font-size:13px">
+            <span id="diff-loss" style="margin-right:8px"></span>
+            <span style="color:var(--text-secondary);font-weight:600;flex:1;text-align:center">Training Loss</span>
+            <span id="diff-time" style="margin-left:8px"></span>
+          </div>
+          <div id="chart-loss"></div>
+        </div>
+      </div>
+      <div id="log-viewer"></div>
     </div>
-    <div id="log-viewer" style="display:none"></div>
   </div>
 
   <!-- History Tab -->
