@@ -31,6 +31,7 @@ export function kpiCard({ label, tooltip = '', hero = false, spark = false, bar 
     valueEl.textContent = value;
     unitEl.textContent = unit;
     subEl.textContent = sub;
+    subEl.title = sub; // long sub-lines (e.g. CPU identity) ellipsize — hover shows all
     subEl.className = 'kpi-sub' + (subClass ? ' ' + subClass : '');
     capEl.textContent = caption;
     capEl.className = 'kpi-caption' + (captionClass ? ' ' + captionClass : '');

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import queue
 import secrets
@@ -205,6 +206,7 @@ async def telemetry_loop() -> None:
     Only polls while at least one browser is subscribed — no API traffic
     when nobody is watching. _sse_send drops events for unwatched pods.
     """
+    log = logging.getLogger("podterm.telemetry")
     while True:
         try:
             if any(sse_subscribers.values()):
@@ -212,7 +214,7 @@ async def telemetry_loop() -> None:
                 for pod_id, t in telemetry.items():
                     _sse_send(pod_id, "telemetry", t)
         except Exception:
-            pass  # transient API failures just skip a tick
+            log.exception("telemetry tick failed")  # transient failures just skip a tick
         await asyncio.sleep(TELEMETRY_POLL_SEC)
 
 

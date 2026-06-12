@@ -175,9 +175,12 @@ def api_terminate_pod(pod_id: str) -> None:
     _rpc("pod", "delete", pod_id)
 
 
-def api_get_pod(pod_id: str) -> dict | None:
+def api_get_pod(pod_id: str, include_machine: bool = False) -> dict | None:
     try:
-        return _rpc_json("pod", "get", pod_id)
+        args = ["pod", "get", pod_id]
+        if include_machine:
+            args.append("--include-machine")
+        return _rpc_json(*args)
     except Exception:
         return None
 
@@ -197,11 +200,14 @@ def api_get_ssh_info(pod_id: str) -> dict | None:
 _GRAPHQL_URL = "https://api.runpod.io/graphql"
 
 _TELEMETRY_QUERY = """query {
-  myself { pods { id desiredStatus runtime {
-    uptimeInSeconds
-    container { cpuPercent memoryPercent }
-    gpus { gpuUtilPercent memoryUtilPercent }
-  } } }
+  myself { pods { id desiredStatus vcpuCount memoryInGb
+    machine { cpuType { displayName } gpuType { memoryInGb } }
+    runtime {
+      uptimeInSeconds
+      container { cpuPercent memoryPercent }
+      gpus { gpuUtilPercent memoryUtilPercent }
+    }
+  } }
 }"""
 
 
@@ -244,6 +250,9 @@ def api_get_telemetry() -> dict[str, dict]:
             continue
         gpus = rt.get("gpus") or []
         container = rt.get("container") or {}
+        machine = pod.get("machine") or {}
+        cpu_type = machine.get("cpuType") or {}
+        gpu_type = machine.get("gpuType") or {}
         out[pod["id"]] = {
             "uptime_s": rt.get("uptimeInSeconds"),
             "cpu_pct": container.get("cpuPercent"),
@@ -251,5 +260,10 @@ def api_get_telemetry() -> dict[str, dict]:
             "gpu_util_pct": sum(g.get("gpuUtilPercent") or 0 for g in gpus) / len(gpus) if gpus else None,
             "gpu_mem_pct": sum(g.get("memoryUtilPercent") or 0 for g in gpus) / len(gpus) if gpus else None,
             "gpu_count": len(gpus),
+            # Static context riding along so the percentages mean something
+            "cpu_name": cpu_type.get("displayName"),
+            "vcpu_count": pod.get("vcpuCount"),
+            "ram_total_gb": pod.get("memoryInGb"),
+            "gpu_mem_total_gb": gpu_type.get("memoryInGb"),
         }
     return out

@@ -119,16 +119,23 @@ function updateTelemetryCards(state, pod) {
   const running = pod.desiredStatus === 'RUNNING';
   const live = running && t;
 
-  if (live && t.cpu_pct != null) pctCard(cards.cpu, t.cpu_pct);
-  else noteTelemetry(cards.cpu, running);
-  if (live && t.mem_pct != null) pctCard(cards.ram, t.mem_pct);
-  else noteTelemetry(cards.ram, running);
+  if (live && t.cpu_pct != null) {
+    pctCard(cards.cpu, t.cpu_pct, t.cpu_name || '');
+  } else noteTelemetry(cards.cpu, running);
+  if (live && t.mem_pct != null) {
+    const ramSub = t.ram_total_gb
+      ? `${((t.mem_pct / 100) * t.ram_total_gb).toFixed(1)} / ${t.ram_total_gb} GB`
+      : '';
+    pctCard(cards.ram, t.mem_pct, ramSub);
+  } else noteTelemetry(cards.ram, running);
   if (live && t.gpu_util_pct != null) pctCard(cards.gpu, t.gpu_util_pct);
   else noteTelemetry(cards.gpu, running);
 
   // GPU memory: live used/total while running; trainer-reported peak after.
+  // Device total comes from telemetry metadata; GPU-name parse is the fallback
+  // for stopped pods where no telemetry flows.
   const gpuName = state.info.gpu_type || state.runRow?.gpu_type || podGpuName(pod);
-  const totalGiB = d.parseGpuMemGiB(gpuName);
+  const totalGiB = (t && t.gpu_mem_total_gb) || d.parseGpuMemGiB(gpuName);
   if (live && t.gpu_mem_pct != null) {
     if (totalGiB) {
       const usedGiB = (t.gpu_mem_pct / 100) * totalGiB;
