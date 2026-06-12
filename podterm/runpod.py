@@ -11,9 +11,12 @@ from podterm.config import (
     DEFAULT_DATACENTER,
     DEFAULT_GPU,
     DEFAULT_VOLUME_DISK_GB,
+    EVENTD_PORT,
     POD_PREFIX,
     TEMPLATE_NAME,
 )
+
+TEMPLATE_PORTS = f"22/tcp,{EVENTD_PORT}/http"
 
 # ---------------------------------------------------------------------------
 # Low-level RPC
@@ -97,13 +100,13 @@ def create_or_update_template(image: str, env_dict: dict) -> str:
     existing_id = find_template()
     if existing_id:
         _rpc("template", "update", existing_id,
-             "--image", image, "--env", env_json, "--ports", "22/tcp")
+             "--image", image, "--env", env_json, "--ports", TEMPLATE_PORTS)
         return existing_id
     data = _rpc_json("template", "create",
                      "--name", TEMPLATE_NAME, "--image", image,
                      "--container-disk-in-gb", str(DEFAULT_CONTAINER_DISK_GB),
                      "--volume-in-gb", str(DEFAULT_VOLUME_DISK_GB),
-                     "--env", env_json, "--ports", "22/tcp")
+                     "--env", env_json, "--ports", TEMPLATE_PORTS)
     return data["id"]
 
 

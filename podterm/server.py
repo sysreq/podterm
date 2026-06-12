@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import queue
+import secrets
 import subprocess
 import threading
 import time
@@ -53,7 +54,7 @@ from podterm.runpod import (
     get_gpt_golf_pods,
     get_network_volume,
 )
-from podterm.ssh import LogQueue, SshTailThread
+from podterm.events import LogQueue, PodPoller
 
 # ---------------------------------------------------------------------------
 # App state
@@ -62,7 +63,7 @@ from podterm.ssh import LogQueue, SshTailThread
 STATIC_DIR = Path(__file__).parent / "static"
 
 log_queue: LogQueue = queue.Queue()
-ssh_threads: dict[str, SshTailThread] = {}
+pollers: dict[str, PodPoller] = {}
 sse_subscribers: dict[str, list[asyncio.Queue]] = {}  # pod_id → client queues
 last_launch_config: dict | None = None
 
@@ -76,11 +77,11 @@ run_exit_code: dict[str, int] = {}
 
 
 # ---------------------------------------------------------------------------
-# Drain loop — reads log_queue, parses, writes to DB, fans out SSE
+# Drain loop — reads structured events off the queue, writes to DB, fans out SSE
 # ---------------------------------------------------------------------------
 
 async def drain_loop() -> None:
-    """Asyncio background task: drain SSH log queue, parse, persist, fan-out to SSE."""
+    """Asyncio background task: drain the pod event queue, persist, fan-out to SSE."""
     metrics_buffer: dict[str, list[StepMetric]] = {}
     last_flush = time.monotonic()
 
@@ -88,20 +89,24 @@ async def drain_loop() -> None:
         drained = 0
         while drained < 500:
             try:
-                pod_id, line = log_queue.get_nowait()
+                pod_id, kind, payload = log_queue.get_nowait()
             except queue.Empty:
                 break
             drained += 1
 
-            # Fan out raw log line to SSE subscribers
-            _sse_send(pod_id, "log", {"line": line})
-
-            # Parse
-            event = parse_line(line)
-            if event is None:
+            if kind == "log":
+                _sse_send(pod_id, "log", payload)
                 continue
 
-            if isinstance(event, StepMetric):
+            t = payload.get("t")
+            if t == "metric":
+                event = StepMetric(
+                    step=payload.get("step", 0), total_steps=payload.get("total_steps", 0),
+                    train_loss=payload.get("train_loss") or 0.0,
+                    train_time_ms=payload.get("train_time_ms", 0),
+                    step_avg_ms=payload.get("step_avg_ms", 0.0),
+                    val_loss=payload.get("val_loss"), val_bpb=payload.get("val_bpb"),
+                )
                 metrics_buffer.setdefault(pod_id, []).append(event)
                 _sse_send(pod_id, "metric", {
                     "step": event.step, "total_steps": event.total_steps,
@@ -109,28 +114,42 @@ async def drain_loop() -> None:
                     "val_loss": event.val_loss, "val_bpb": event.val_bpb,
                     "train_time_ms": event.train_time_ms,
                 })
-            elif isinstance(event, MemoryInfo):
+            elif t == "memory":
+                event = MemoryInfo(peak_mib=payload.get("peak_mib", 0), reserved_mib=payload.get("reserved_mib", 0))
                 run_memory[pod_id] = event
                 _sse_send(pod_id, "memory", asdict(event))
                 db.update_run(pod_id, peak_memory_mib=event.peak_mib, reserved_memory_mib=event.reserved_mib)
-            elif isinstance(event, RunSummary):
+            elif t == "summary":
+                event = RunSummary(
+                    final_val_bpb=payload.get("final_val_bpb", 0.0),
+                    best_val_bpb=payload.get("best_val_bpb", 0.0),
+                )
                 run_summary[pod_id] = event
-                _sse_send(pod_id, "summary", asdict(event))
-            elif isinstance(event, ModelInfo):
-                _sse_send(pod_id, "info", {"model_params": event.params})
-                db.update_run(pod_id, model_params=event.params)
-            elif isinstance(event, CommitInfo):
-                _sse_send(pod_id, "info", {"commit_hash": event.hash, "commit_msg": event.message})
-                db.update_run(pod_id, commit_hash=event.hash, commit_msg=event.message)
-            elif isinstance(event, PhaseMarker):
-                _sse_send(pod_id, "phase", {"phase": event.phase, "exit_code": event.exit_code})
-                if event.exit_code is not None:
-                    run_exit_code[pod_id] = event.exit_code
-                if "Starting Training" in event.phase:
+                _sse_send(pod_id, "summary", {**asdict(event), "final_val_loss": payload.get("final_val_loss")})
+            elif t == "model":
+                _sse_send(pod_id, "info", {"model_params": payload.get("model_params")})
+                db.update_run(pod_id, model_params=payload.get("model_params"))
+            elif t == "commit":
+                _sse_send(pod_id, "info", {"commit_hash": payload.get("commit_hash"), "commit_msg": payload.get("commit_msg")})
+                db.update_run(pod_id, commit_hash=payload.get("commit_hash"), commit_msg=payload.get("commit_msg"))
+            elif t == "gpu":
+                _sse_send(pod_id, "info", {"gpu_type": payload.get("gpu_type")})
+                db.update_run(pod_id, gpu_type=payload.get("gpu_type"), gpu_count=payload.get("gpu_count", 1))
+            elif t == "phase":
+                phase = str(payload.get("phase", ""))
+                exit_code = payload.get("exit_code")
+                _sse_send(pod_id, "phase", {"phase": phase, "exit_code": exit_code})
+                if exit_code is not None:
+                    run_exit_code[pod_id] = exit_code
+                if "Starting Training" in phase:
                     # Clear metrics buffer on restart
                     metrics_buffer.pop(pod_id, None)
-                elif "Training finished" in event.phase:
+                elif "Training finished" in phase:
                     _finalize_run(pod_id)
+            elif t == "pod_gone":
+                _finalize_run(pod_id)
+            elif t == "raw":
+                _sse_send(pod_id, "log", {"line": payload.get("line", "")})
 
         # Batch-flush metrics to DB every 5 seconds
         now = time.monotonic()
@@ -183,17 +202,28 @@ def _finalize_run(pod_id: str) -> None:
 
 
 def _connect_pod(pod_id: str, pod_name: str, cost_per_hr=None) -> None:
-    """Start SSH streaming for a pod if not already connected."""
+    """Start event polling for a pod if not already connected."""
     with _launch_lock:
-        if pod_id in ssh_threads:
+        if pod_id in pollers:
             return
-        try:
-            db.create_run(pod_id, pod_name, {"gpu": "", "cost_per_hr": cost_per_hr})
-        except Exception:
-            pass
-        thread = SshTailThread(pod_id, pod_name, log_queue)
-        ssh_threads[pod_id] = thread
-        thread.start()
+        run = db.get_run(pod_id)
+        token = None
+        if run and run.get("config_json"):
+            try:
+                token = json.loads(run["config_json"]).get("eventd_token")
+            except Exception:
+                token = None
+        if not run:
+            try:
+                db.create_run(pod_id, pod_name, {"gpu": "", "cost_per_hr": cost_per_hr})
+            except Exception:
+                pass
+        poller = PodPoller(pod_id, pod_name, token or "", log_queue)
+        pollers[pod_id] = poller  # registered even without a token so we don't retry every poll
+        if token:
+            poller.start()
+        else:
+            log_queue.put((pod_id, "log", {"line": "No event-daemon token recorded for this pod — live stream unavailable."}))
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +255,8 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     task.cancel()
-    for t in ssh_threads.values():
-        t.stop()
+    for p in pollers.values():
+        p.stop()
     db.close()
 
 
@@ -264,7 +294,7 @@ async def list_pods():
         # Auto-connect to running pods
         for p in pods:
             pid = p.get("id", "")
-            if p.get("desiredStatus") == "RUNNING" and pid not in ssh_threads:
+            if p.get("desiredStatus") == "RUNNING" and pid not in pollers:
                 _connect_pod(pid, p.get("name", pid), p.get("costPerHr"))
         return pods
     pods = await asyncio.to_thread(_fetch)
@@ -302,13 +332,15 @@ class LaunchConfig(BaseModel):
 async def launch_pod(cfg: LaunchConfig):
     global last_launch_config
     cfg_dict = cfg.model_dump()
-    last_launch_config = cfg_dict
+    last_launch_config = dict(cfg_dict)  # copy: cfg_dict later gains eventd_token, which must not reach /api/last-config
 
     def _launch():
         suffix = cfg.name or cfg.branch
         pod_name = f"{POD_PREFIX}-{suffix}-{time.strftime('%m%d-%H%M%S')}"
+        token = secrets.token_urlsafe(32)
 
         env = {
+            "EVENTD_TOKEN": token,
             "BRANCH": cfg.branch,
             "PREP_SHARDS": str(cfg.prep_shards),
             "TRAIN_SCRIPT": cfg.train_script,
@@ -342,7 +374,7 @@ async def launch_pod(cfg: LaunchConfig):
 
         # Hold the lock across template update + pod create so concurrent
         # launches don't clobber each other's template env vars, and across
-        # ssh_threads assignment so refreshPods() can't create a duplicate.
+        # pollers assignment so refreshPods() can't create a duplicate.
         with _launch_lock:
             tpl = create_or_update_template(DEFAULT_IMAGE, env)
             pod = api_create_pod(
@@ -353,12 +385,13 @@ async def launch_pod(cfg: LaunchConfig):
             pod_id = pod["id"]
             cost = pod.get("costPerHr", 0)
             cfg_dict["cost_per_hr"] = cost
+            cfg_dict["eventd_token"] = token  # persisted in config_json so restarts can reconnect
 
             db.create_run(pod_id, pod_name, cfg_dict)
 
-            thread = SshTailThread(pod_id, pod_name, log_queue)
-            ssh_threads[pod_id] = thread
-            thread.start()
+            poller = PodPoller(pod_id, pod_name, token, log_queue)
+            pollers[pod_id] = poller
+            poller.start()
 
         return {"pod_id": pod_id, "name": pod_name, "cost_per_hr": cost}
 
@@ -370,9 +403,9 @@ async def stop_pod(pod_id: str):
     def _stop():
         api_terminate_pod(pod_id)
         with _launch_lock:
-            thread = ssh_threads.pop(pod_id, None)
-        if thread:
-            thread.stop()
+            poller = pollers.pop(pod_id, None)
+        if poller:
+            poller.stop()
         _finalize_run(pod_id)
         return {"status": "terminated", "pod_id": pod_id}
     return await asyncio.to_thread(_stop)

@@ -31,6 +31,10 @@ BASELINE_GPU_COUNT = 8
 
 TEMPLATE_NAME = "gpt-golf-train"
 
+# Port the on-pod event daemon (gpt-golf scripts/pod_eventd.py) listens on,
+# exposed as /http in the template → https://{pod_id}-{port}.proxy.runpod.net
+EVENTD_PORT = 8765
+
 # ---------------------------------------------------------------------------
 # Debug environment helpers
 # ---------------------------------------------------------------------------
