@@ -5,101 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PodTerm v2.0</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-         background: #1a1a2e; color: #e0e0e0; display: flex; height: 100vh; overflow: hidden; }
-
-  /* Sidebar */
-  #sidebar { width: 220px; background: #16213e; border-right: 1px solid #2a2a4a;
-             display: flex; flex-direction: column; flex-shrink: 0; }
-  #sidebar h2 { padding: 16px; font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
-  #pod-list { flex: 1; overflow-y: auto; padding: 0 8px; }
-  .pod-btn { display: block; width: 100%; padding: 8px 12px; margin-bottom: 4px; background: #1a1a2e;
-             border: 1px solid #2a2a4a; border-radius: 6px; color: #e0e0e0; cursor: pointer;
-             text-align: left; font-size: 13px; transition: background 0.15s; }
-  .pod-btn:hover { background: #2a2a4a; }
-  .pod-btn.active { background: #0f3460; border-color: #4a9eff; }
-  .pod-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-  .dot-running { background: #4ade80; }
-  .dot-stopped { background: #666; }
-  #sidebar-actions { padding: 8px; border-top: 1px solid #2a2a4a; }
-  #sidebar-actions button { display: block; width: 100%; padding: 8px; margin-bottom: 4px;
-    background: #0f3460; border: 1px solid #4a9eff; border-radius: 6px; color: #e0e0e0;
-    cursor: pointer; font-size: 13px; transition: background 0.15s; }
-  #sidebar-actions button:hover { background: #1a5276; }
-  #sidebar-actions button.danger { background: #4a1520; border-color: #ff4a6e; }
-  #sidebar-actions button.danger:hover { background: #6a1a2a; }
-  #status { padding: 8px 12px; font-size: 11px; color: #666; border-top: 1px solid #2a2a4a; }
-
-  /* Main area */
-  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  #tab-bar { display: flex; background: #16213e; border-bottom: 1px solid #2a2a4a; }
-  .tab { padding: 10px 24px; cursor: pointer; border-bottom: 2px solid transparent;
-         color: #888; font-size: 13px; transition: all 0.15s; }
-  .tab:hover { color: #e0e0e0; }
-  .tab.active { color: #4a9eff; border-bottom-color: #4a9eff; }
-  .tab-content { display: none; flex: 1; overflow-y: auto; padding: 16px; }
-  .tab-content.active { display: flex; flex-direction: column; }
-
-  /* Live tab */
-  #live-info { display: flex; gap: 24px; padding: 8px 0; font-size: 13px; color: #aaa;
-               flex-wrap: wrap; margin-bottom: 8px; }
-  #live-info span { background: #16213e; padding: 4px 10px; border-radius: 4px; }
-  #live-charts .chart-box { background: #16213e; border-radius: 8px; padding: 4px; }
-  #log-viewer { margin-top: 8px; background: #0d1117; border: 1px solid #2a2a4a; border-radius: 8px;
-                padding: 12px; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px;
-                line-height: 1.5; max-height: 250px; overflow-y: auto; white-space: pre-wrap;
-                word-break: break-all; flex-shrink: 0; }
-
-  /* History tab */
-  #history-filter { padding: 8px 12px; background: #16213e; border: 1px solid #2a2a4a;
-                    border-radius: 6px; color: #e0e0e0; width: 300px; margin-bottom: 12px; font-size: 13px; }
-  #history-actions { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
-  #history-actions button { padding: 6px 16px; background: #0f3460; border: 1px solid #4a9eff;
-    border-radius: 6px; color: #e0e0e0; cursor: pointer; font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; padding: 8px; background: #16213e; border-bottom: 2px solid #2a2a4a;
-       color: #888; font-weight: 600; cursor: pointer; user-select: none; }
-  th:hover { color: #e0e0e0; }
-  td { padding: 6px 8px; border-bottom: 1px solid #1e1e3a; }
-  tr:hover td { background: #1e1e3a; }
-
-  /* Compare tab */
-  #compare-charts .chart-box { background: #16213e; border-radius: 8px; padding: 4px;
-                                min-height: 280px; margin-bottom: 12px; }
-
-  /* Launch dialog */
-  dialog { background: #1a1a2e; color: #e0e0e0; border: 1px solid #4a9eff; border-radius: 12px;
-           padding: 24px; width: 520px; max-height: 80vh; overflow-y: auto; }
-  dialog::backdrop { background: rgba(0,0,0,0.7); }
-  dialog h3 { margin-bottom: 16px; }
-  dialog label { display: block; font-size: 12px; color: #888; margin-top: 10px; margin-bottom: 4px; }
-  dialog input, dialog select { display: block; width: 100%; padding: 8px; background: #16213e;
-    border: 1px solid #2a2a4a; border-radius: 6px; color: #e0e0e0; font-size: 13px; }
-  dialog .btn-row { margin-top: 16px; display: flex; gap: 8px; }
-  dialog button { padding: 8px 24px; border-radius: 6px; border: 1px solid #4a9eff;
-    background: #0f3460; color: #e0e0e0; cursor: pointer; font-size: 13px; }
-  dialog button.primary { background: #4a9eff; color: #000; font-weight: 600; }
-  details { margin-top: 12px; }
-  summary { cursor: pointer; color: #888; font-size: 13px; }
-  dialog .chk-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-  dialog .chk-row input[type=checkbox] { width: auto; }
-
-  /* Compare selection chips */
-  #compare-selection { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; align-items: center; }
-  #compare-selection span { font-size: 12px; color: #888; }
-  .run-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: #16213e;
-    border: 1px solid #2a2a4a; border-radius: 16px; font-size: 12px; }
-  .run-chip .chip-x { cursor: pointer; color: #888; font-size: 14px; line-height: 1; }
-  .run-chip .chip-x:hover { color: #ff6b6b; }
-
-  /* Placeholder */
-  .placeholder { color: #555; text-align: center; padding: 60px 0; font-size: 14px; }
-
-  /* Plotly overrides */
-  .js-plotly-plot .plotly .modebar { right: 8px !important; }
-</style>
+<link rel="stylesheet" href="/static/css/tokens.css">
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/layout.css">
+<link rel="stylesheet" href="/static/css/components.css">
 </head>
 <body>
 
@@ -107,18 +16,18 @@
   <h2>PodTerm</h2>
   <div id="pod-list"></div>
   <div id="sidebar-actions">
-    <button onclick="openLaunchDialog()">Launch</button>
-    <button class="danger" onclick="stopPod()">Stop</button>
-    <button onclick="refreshPods()">Refresh</button>
+    <button id="btn-launch">Launch</button>
+    <button id="btn-stop" class="danger">Stop</button>
+    <button id="btn-refresh">Refresh</button>
   </div>
   <div id="status">Loading...</div>
 </div>
 
 <div id="main">
   <div id="tab-bar">
-    <div class="tab active" data-tab="live" onclick="switchTab('live')">Live</div>
-    <div class="tab" data-tab="history" onclick="switchTab('history')">History</div>
-    <div class="tab" data-tab="compare" onclick="switchTab('compare')">Compare</div>
+    <div class="tab active" data-tab="live">Live</div>
+    <div class="tab" data-tab="history">History</div>
+    <div class="tab" data-tab="compare">Compare</div>
   </div>
 
   <!-- Live Tab -->
@@ -126,8 +35,8 @@
     <div id="live-placeholder" class="placeholder">Select a running pod or launch a new experiment.</div>
     <div id="live-info" style="display:none"></div>
     <div id="live-baseline" style="display:none;margin-bottom:8px">
-      <label style="font-size:12px;color:#888;margin-right:8px">Baseline:</label>
-      <select id="baseline-select" onchange="onBaselineChange()" style="padding:4px 8px;background:#16213e;border:1px solid #2a2a4a;border-radius:6px;color:#e0e0e0;font-size:12px;width:300px">
+      <label style="font-size:12px;color:var(--text-muted);margin-right:8px">Baseline:</label>
+      <select id="baseline-select" style="padding:4px 8px;background:var(--bg-panel);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:300px">
         <option value="">None</option>
       </select>
     </div>
@@ -135,7 +44,7 @@
       <div class="chart-box chart-wide">
         <div id="chart-loss-header" style="display:flex;align-items:baseline;padding:4px 8px 0;font-size:13px">
           <span id="diff-loss" style="margin-right:8px"></span>
-          <span style="color:#aaa;font-weight:600;flex:1;text-align:center">Training Loss</span>
+          <span style="color:var(--text-secondary);font-weight:600;flex:1;text-align:center">Training Loss</span>
           <span id="diff-time" style="margin-left:8px"></span>
         </div>
         <div id="chart-loss"></div>
@@ -146,13 +55,13 @@
 
   <!-- History Tab -->
   <div id="tab-history" class="tab-content">
-    <input id="history-filter" placeholder="Filter by branch or GPU..." oninput="filterHistory()">
+    <input id="history-filter" placeholder="Filter by branch or GPU...">
     <div id="history-actions">
-      <button onclick="compareSelected()">Compare Selected</button>
-      <button onclick="clearSelection()">Clear</button>
+      <button id="btn-compare-selected">Compare Selected</button>
+      <button id="btn-clear-selection">Clear</button>
       <span id="selection-count">0 selected</span>
       <span style="margin-left: auto"></span>
-      <button onclick="openImportDialog()">Import Logs</button>
+      <button id="btn-import-logs">Import Logs</button>
     </div>
     <div id="history-table-area"></div>
   </div>
@@ -172,11 +81,11 @@
   <label>Branch</label>
   <select id="f-branch"></select>
   <label>Datacenter</label>
-  <select id="f-dc" onchange="onDcChange()"></select>
+  <select id="f-dc"></select>
   <label>GPU</label>
   <select id="f-gpu"></select>
   <label>Data Variant</label>
-  <select id="f-variant" onchange="onVariantChange()"></select>
+  <select id="f-variant"></select>
   <label>Data shards</label>
   <input id="f-shards" type="number" value="20" min="1">
   <details>
@@ -201,658 +110,22 @@
     <input id="f-redis" placeholder="e.g. 10.0.0.5:6379">
   </details>
   <div class="btn-row">
-    <button class="primary" onclick="doLaunch()">Launch</button>
-    <button onclick="document.getElementById('launch-dialog').close()">Cancel</button>
+    <button id="btn-do-launch" class="primary">Launch</button>
+    <button id="btn-launch-cancel">Cancel</button>
   </div>
 </dialog>
 
 <!-- Import Logs Dialog -->
 <dialog id="import-dialog">
   <h3>Import Log Files</h3>
-  <p style="font-size:12px;color:#888;margin-bottom:12px">Scan .cache/logs/ and .local/examples/ for training logs to import into the database.</p>
+  <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Scan .cache/logs/ and .local/examples/ for training logs to import into the database.</p>
   <div id="import-list" style="max-height:400px;overflow-y:auto"></div>
   <div class="btn-row">
-    <button class="primary" onclick="importAllLogs()">Import All</button>
-    <button onclick="document.getElementById('import-dialog').close()">Close</button>
+    <button id="btn-import-all" class="primary">Import All</button>
+    <button id="btn-import-close">Close</button>
   </div>
 </dialog>
 
-<script>
-// ── State ──
-let activePod = null;
-let pods = [];
-let historyRuns = [];
-let selectedRuns = new Set();
-let variantLookup = {};
-const podState = {};  // pod_id → per-pod live state
-const COLORS = ['#ffd166','#ff6b6b','#48dbfb','#81ecec','#a29bfe','#fd79a8'];
-
-// Custom loss scale — bottom 50% = 3.0-3.5 (fine detail), then compressed above.
-// Anything above 8 is clamped.
-function scaleY(loss) {
-  if (loss >= 8)   return 1;
-  if (loss >= 5)   return 0.9 + (loss - 5) / 3 * 0.1;
-  if (loss >= 4)   return 0.8 + (loss - 4) * 0.1;
-  if (loss >= 3.5) return 0.5 + (loss - 3.5) * 0.6;
-  return loss - 3;
-}
-const lossTicks = [3, 3.1, 3.2, 3.3, 3.4, 3.5, 4, 5, 8];
-const lossYAxis = {
-  gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a',
-  tickvals: lossTicks.map(scaleY),
-  ticktext: lossTicks.map(v => v % 1 === 0 ? String(v) : v.toFixed(1)),
-  range: [-0.02, 1.05],
-};
-const lossHover = 'Step %{x}<br>Loss: %{customdata:.4f}<extra></extra>';
-
-const plotLayout = {
-  paper_bgcolor: '#16213e', plot_bgcolor: '#16213e', font: { color: '#aaa', size: 11 },
-  margin: { l: 50, r: 20, t: 30, b: 35 }, legend: { orientation: 'h', y: -0.15 },
-  xaxis: { gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-  yaxis: { gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-};
-const plotConfig = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d','select2d'] };
-
-// ── Tabs ──
-function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.toggle('active', c.id === 'tab-'+tab));
-  if (tab === 'history') loadHistory();
-}
-
-// ── Pods ──
-async function refreshPods() {
-  try {
-    const r = await fetch('/api/pods');
-    pods = await r.json();
-    renderPodList();
-    const running = pods.filter(p => p.desiredStatus === 'RUNNING').length;
-    document.getElementById('status').textContent = `${pods.length} pods, ${running} running`;
-  } catch(e) {
-    document.getElementById('status').textContent = 'Error loading pods';
-  }
-}
-
-function renderPodList() {
-  const el = document.getElementById('pod-list');
-  el.innerHTML = '';
-  for (const p of pods) {
-    const btn = document.createElement('button');
-    btn.className = 'pod-btn' + (p.id === activePod ? ' active' : '');
-    const running = p.desiredStatus === 'RUNNING';
-    btn.innerHTML = `<span class="pod-dot ${running ? 'dot-running' : 'dot-stopped'}"></span>${(p.name||p.id).slice(0,22)}`;
-    btn.onclick = () => selectPod(p.id);
-    el.appendChild(btn);
-  }
-}
-
-function selectPod(podId) {
-  activePod = podId;
-  renderPodList();
-  switchTab('live');
-  renderLiveView(podId);
-}
-
-// ── Per-pod state ──
-function getPodState(podId) {
-  if (!podState[podId]) {
-    podState[podId] = {
-      es: null,
-      logText: '',
-      lossX: [], lossY: [], lossRaw: [],
-      baselineRunId: null, baselineByStep: {},
-      baselineX: [], baselineY: [], baselineRaw: [],
-      info: { step: 'Step: -', avg: 'Avg: -', loss: 'Loss: -', bpb: 'BPB: -', mem: 'Mem: -' },
-      lastMetric: null,
-    };
-  }
-  return podState[podId];
-}
-
-function ensurePodStream(podId) {
-  const state = getPodState(podId);
-  if (state.es) return;
-
-  const es = new EventSource(`/api/stream/${podId}`);
-  state.es = es;
-
-  es.addEventListener('log', e => {
-    const d = JSON.parse(e.data);
-    const lines = state.logText.split('\n');
-    if (lines.length > 500) state.logText = lines.slice(-400).join('\n');
-    state.logText += d.line + '\n';
-    if (activePod === podId) {
-      const viewer = document.getElementById('log-viewer');
-      viewer.textContent = state.logText;
-      viewer.scrollTop = viewer.scrollHeight;
-    }
-  });
-
-  es.addEventListener('metric', e => {
-    const m = JSON.parse(e.data);
-    if (m.train_loss && m.train_loss > 0) {
-      state.lossX.push(m.step);
-      state.lossY.push(scaleY(m.train_loss));
-      state.lossRaw.push(m.train_loss);
-    }
-    if (m.val_bpb != null) state.info.bpb = `BPB: ${m.val_bpb.toFixed(4)}`;
-    state.info.step = `Step: ${m.step}/${m.total_steps}`;
-    state.info.avg = `Avg: ${m.step_avg_ms.toFixed(1)} ms`;
-    if (m.train_loss > 0) state.info.loss = `Loss: ${m.train_loss.toFixed(4)}`;
-    state.lastMetric = m;
-
-    if (activePod === podId) {
-      if (m.train_loss && m.train_loss > 0) {
-        Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[scaleY(m.train_loss)]], customdata: [[m.train_loss]] }, [0]);
-      }
-      document.getElementById('info-step').textContent = state.info.step;
-      document.getElementById('info-avg').textContent = state.info.avg;
-      document.getElementById('info-loss').textContent = state.info.loss;
-      document.getElementById('info-bpb').textContent = state.info.bpb;
-      updateBaselineDiffs(m);
-    }
-  });
-
-  es.addEventListener('memory', e => {
-    const m = JSON.parse(e.data);
-    state.info.mem = `Mem: ${m.peak_mib} MiB`;
-    if (activePod === podId) {
-      document.getElementById('info-mem').textContent = state.info.mem;
-    }
-  });
-
-  es.addEventListener('phase', e => {
-    const d = JSON.parse(e.data);
-    if (d.phase && d.phase.includes('Starting Training')) {
-      state.lossX.length = 0;
-      state.lossY.length = 0;
-      state.lossRaw.length = 0;
-      if (activePod === podId) {
-        Plotly.restyle('chart-loss', { x: [[]], y: [[]], customdata: [[]] }, [0]);
-      }
-    }
-  });
-}
-
-// ── Live View ──
-function renderLiveView(podId) {
-  ensurePodStream(podId);
-  const state = getPodState(podId);
-
-  document.getElementById('live-placeholder').style.display = 'none';
-  document.getElementById('live-info').style.display = 'flex';
-  document.getElementById('live-baseline').style.display = 'flex';
-  document.getElementById('live-charts').style.display = 'grid';
-  document.getElementById('log-viewer').style.display = 'block';
-  document.getElementById('log-viewer').textContent = state.logText;
-  const viewer = document.getElementById('log-viewer');
-  viewer.scrollTop = viewer.scrollHeight;
-
-  // Info bar — static from pod data, dynamic from cached state
-  const pod = pods.find(p => p.id === podId) || {};
-  const rt = pod.runtime || {};
-  const gpus = rt.gpus || [];
-  const gpuName = gpus.length ? gpus[0].gpuDisplayName : (pod.machine||{}).gpuDisplayName || pod.gpu || '-';
-  const cost = pod.costPerHr || '?';
-  document.getElementById('live-info').innerHTML =
-    `<span>GPU: ${gpuName}</span><span>$/hr: ${cost}</span><span id="info-step">${state.info.step}</span><span id="info-avg">${state.info.avg}</span><span id="info-loss">${state.info.loss}</span><span id="info-bpb">${state.info.bpb}</span><span id="info-mem">${state.info.mem}</span><a href="/api/runs/${podId}/log" target="_blank" style="color:#4a9eff;text-decoration:none;font-size:12px;margin-left:auto">Full Log</a>`;
-
-  // Rebuild chart from cached data
-  const traces = [
-    { x: state.lossX.slice(), y: state.lossY.slice(), customdata: state.lossRaw.slice(),
-      name: 'train_loss', type: 'scatter', line: { color: '#ffd166' }, hovertemplate: lossHover }
-  ];
-  if (state.baselineX.length) {
-    traces.push({ x: state.baselineX, y: state.baselineY, customdata: state.baselineRaw,
-      name: 'baseline', type: 'scatter', line: { color: 'rgba(255,255,255,0.35)', dash: 'dash' }, hovertemplate: lossHover });
-  }
-  Plotly.newPlot('chart-loss', traces, { ...plotLayout, yaxis: lossYAxis, height: 400 }, plotConfig);
-
-  // Populate baseline selector and restore saved selection
-  loadBaselineOptions(podId);
-
-  // Clear stale diffs from previously viewed pod, then restore if we have data
-  document.getElementById('diff-loss').innerHTML = '';
-  document.getElementById('diff-time').innerHTML = '';
-  if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
-}
-
-// ── Baseline ──
-async function loadBaselineOptions(podId) {
-  const sel = document.getElementById('baseline-select');
-  sel.innerHTML = '<option value="">None</option>';
-  try {
-    const runs = await fetch('/api/runs?limit=30').then(r => r.json());
-    if (activePod !== podId) return;  // user switched during fetch
-    for (const r of runs) {
-      if (r.run_id === podId) continue; // skip self
-      if (!r.total_steps) continue; // skip runs with no data
-      const bpb = r.best_val_bpb != null ? ` | BPB ${r.best_val_bpb.toFixed(4)}` : '';
-      const label = `${r.pod_name||r.run_id} (${r.branch||'?'}${bpb})`;
-      const opt = document.createElement('option');
-      opt.value = r.run_id;
-      opt.textContent = label;
-      sel.appendChild(opt);
-    }
-  } catch(e) {}
-  // Restore saved selection
-  const state = getPodState(podId);
-  if (state.baselineRunId) sel.value = state.baselineRunId;
-}
-
-async function onBaselineChange() {
-  if (!activePod) return;
-  const state = getPodState(activePod);
-  const podId = activePod;
-  const runId = document.getElementById('baseline-select').value;
-
-  // Remove existing baseline trace (always index 1 if present)
-  if (state.baselineRunId) {
-    try { Plotly.deleteTraces('chart-loss', [1]); } catch(e) {}
-  }
-
-  state.baselineRunId = runId || null;
-  state.baselineByStep = {};
-  state.baselineX = [];
-  state.baselineY = [];
-  state.baselineRaw = [];
-  document.getElementById('diff-loss').innerHTML = '';
-  document.getElementById('diff-time').innerHTML = '';
-
-  if (!runId) return;
-
-  const metrics = await fetch(`/api/runs/${runId}/metrics`).then(r => r.json());
-  if (activePod !== podId) return;  // user switched during fetch
-
-  for (const m of metrics) {
-    state.baselineByStep[m.step] = m;
-  }
-  const baselineMetrics = metrics.filter(m => m.train_loss);
-  state.baselineX = baselineMetrics.map(m => m.step);
-  state.baselineY = baselineMetrics.map(m => scaleY(m.train_loss));
-  state.baselineRaw = baselineMetrics.map(m => m.train_loss);
-
-  if (state.baselineX.length) {
-    Plotly.addTraces('chart-loss', { x: state.baselineX, y: state.baselineY, customdata: state.baselineRaw,
-      name: 'baseline', type: 'scatter', line: { color: 'rgba(255,255,255,0.35)', dash: 'dash' }, hovertemplate: lossHover });
-  }
-  if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
-}
-
-function updateBaselineDiffs(m) {
-  if (!activePod) return;
-  const state = getPodState(activePod);
-  if (!state.baselineRunId || !Object.keys(state.baselineByStep).length) {
-    document.getElementById('diff-loss').innerHTML = '';
-    document.getElementById('diff-time').innerHTML = '';
-    return;
-  }
-
-  const bSteps = Object.keys(state.baselineByStep).map(Number).sort((a,b) => a-b);
-  let bStep = null;
-  for (let i = bSteps.length - 1; i >= 0; i--) {
-    if (bSteps[i] <= m.step) { bStep = bSteps[i]; break; }
-  }
-  if (bStep == null) return;
-
-  const b = state.baselineByStep[bStep];
-  const diffEl = document.getElementById('diff-loss');
-  const timeEl = document.getElementById('diff-time');
-
-  // Loss diff (negative = better)
-  if (m.train_loss > 0 && b.train_loss) {
-    const d = m.train_loss - b.train_loss;
-    const sign = d > 0 ? '+' : '';
-    const color = d <= 0 ? '#4ade80' : '#ff6b6b';
-    diffEl.innerHTML = `<span style="color:${color};font-weight:600">(${sign}${d.toFixed(4)})</span>`;
-  }
-
-  // Time diffs: step_avg diff + wall-clock diff from train_time
-  let parts = [];
-  if (m.step_avg_ms && b.step_avg_ms) {
-    const dAvg = m.step_avg_ms - b.step_avg_ms;
-    const sign = dAvg > 0 ? '+' : '';
-    const color = dAvg <= 0 ? '#4ade80' : '#ff6b6b';
-    parts.push(`<span style="color:${color}">${sign}${dAvg.toFixed(1)}ms</span>`);
-  }
-  if (m.train_time_ms && b.train_time_ms) {
-    const dWall = m.train_time_ms - b.train_time_ms;
-    const absSec = Math.abs(dWall / 1000);
-    let timeStr;
-    if (absSec >= 60) { timeStr = `${(absSec/60).toFixed(1)}m`; }
-    else { timeStr = `${absSec.toFixed(1)}s`; }
-    const color = dWall <= 0 ? '#4ade80' : '#ff6b6b';
-    const label = dWall <= 0 ? 'ahead' : 'behind';
-    parts.push(`<span style="color:${color}">${timeStr} ${label}</span>`);
-  }
-  timeEl.innerHTML = parts.join('<span style="color:#555"> / </span>');
-}
-
-// ── Stop ──
-async function stopPod() {
-  if (!activePod) return;
-  if (!confirm(`Terminate pod ${activePod}?`)) return;
-  document.getElementById('status').textContent = `Stopping ${activePod}...`;
-  try {
-    await fetch(`/api/pods/${activePod}/stop`, { method: 'POST' });
-    document.getElementById('status').textContent = `Terminated ${activePod}`;
-    const state = podState[activePod];
-    if (state && state.es) state.es.close();
-    delete podState[activePod];
-    refreshPods();
-  } catch(e) {
-    document.getElementById('status').textContent = `Stop failed: ${e}`;
-  }
-}
-
-// ── Launch Dialog ──
-async function openLaunchDialog() {
-  const dlg = document.getElementById('launch-dialog');
-  // Fetch form data in parallel
-  const [branches, dcs, variants, lastCfg, redis] = await Promise.all([
-    fetch('/api/branches').then(r=>r.json()),
-    fetch('/api/datacenters').then(r=>r.json()),
-    fetch('/api/variants').then(r=>r.json()),
-    fetch('/api/last-config').then(r=>r.json()),
-    fetch('/api/redis-server').then(r=>r.json()),
-  ]);
-  variantLookup = variants.lookup || {};
-
-  fillSelect('f-branch', branches.map(b => ({label: b, id: b})), lastCfg.branch);
-  fillSelect('f-dc', dcs.map(dc => ({label: `${dc.id} (${dc.location||''})`, id: dc.id})), lastCfg.datacenter);
-  fillSelect('f-variant', variants.options || [], lastCfg.data_variant);
-
-  // Load GPUs for selected DC
-  await onDcChange();
-
-  // Populate advanced fields from last config
-  if (lastCfg.name) document.getElementById('f-name').value = lastCfg.name;
-  if (lastCfg.gpu_count) document.getElementById('f-gpu-count').value = lastCfg.gpu_count;
-  if (lastCfg.train_script) document.getElementById('f-train-script').value = lastCfg.train_script;
-  if (lastCfg.profile_steps) document.getElementById('f-profile').value = lastCfg.profile_steps;
-  if (lastCfg.compile_debug) document.getElementById('f-compile-debug').checked = lastCfg.compile_debug;
-  if (lastCfg.graph_logs) document.getElementById('f-graph-logs').checked = lastCfg.graph_logs;
-  if (lastCfg.time_budget) document.getElementById('f-time').value = lastCfg.time_budget;
-  if (lastCfg.data_repo_id) document.getElementById('f-data-repo').value = lastCfg.data_repo_id;
-  if (lastCfg.data_version) document.getElementById('f-data-version').value = lastCfg.data_version;
-  document.getElementById('f-redis').value = lastCfg.redis_cache_server || redis.address || '';
-
-  dlg.showModal();
-}
-
-function fillSelect(id, options, defaultVal) {
-  const sel = document.getElementById(id);
-  sel.innerHTML = '';
-  for (const o of options) {
-    const opt = document.createElement('option');
-    opt.value = o.id;
-    opt.textContent = o.label;
-    if (o.id === defaultVal) opt.selected = true;
-    sel.appendChild(opt);
-  }
-}
-
-async function onDcChange() {
-  const dc = document.getElementById('f-dc').value;
-  const gpus = await fetch(`/api/gpus/${dc}`).then(r=>r.json());
-  fillSelect('f-gpu', gpus, null);
-}
-
-function onVariantChange() {
-}
-
-async function doLaunch() {
-  const variant = document.getElementById('f-variant').value;
-  const vinfo = variantLookup[variant] || {};
-  const cfg = {
-    branch: document.getElementById('f-branch').value,
-    name: document.getElementById('f-name').value || null,
-    datacenter: document.getElementById('f-dc').value,
-    gpu: document.getElementById('f-gpu').value,
-    gpu_count: parseInt(document.getElementById('f-gpu-count').value) || 1,
-    train_script: document.getElementById('f-train-script').value || 'train_gpt.py',
-    profile_steps: parseInt(document.getElementById('f-profile').value) || 0,
-    compile_debug: document.getElementById('f-compile-debug').checked,
-    graph_logs: document.getElementById('f-graph-logs').checked,
-    time_budget: parseInt(document.getElementById('f-time').value) || 600,
-    prep_shards: parseInt(document.getElementById('f-shards').value) || 20,
-    data_repo_id: document.getElementById('f-data-repo').value || 'sysrekt/parameter-golf',
-    data_version: document.getElementById('f-data-version').value || 'main',
-    redis_cache_server: document.getElementById('f-redis').value || '',
-    data_variant: vinfo.data_variant || variant,
-    data_path: vinfo.data_path || '',
-    tokenizer_path: vinfo.tokenizer_path || '',
-    vocab_size: vinfo.vocab_size || '',
-  };
-
-  document.getElementById('launch-dialog').close();
-  document.getElementById('status').textContent = 'Launching...';
-
-  try {
-    const r = await fetch('/api/pods/launch', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg)
-    });
-    const result = await r.json();
-    document.getElementById('status').textContent = `Launched ${result.name} ($${result.cost_per_hr}/hr)`;
-    await refreshPods();
-    selectPod(result.pod_id);
-  } catch(e) {
-    document.getElementById('status').textContent = `Launch failed: ${e}`;
-  }
-}
-
-// ── History ──
-async function loadHistory() {
-  try {
-    const r = await fetch('/api/runs');
-    historyRuns = await r.json();
-    renderHistoryTable();
-  } catch(e) {}
-}
-
-function filterHistory() {
-  renderHistoryTable();
-}
-
-function renderHistoryTable() {
-  const ft = (document.getElementById('history-filter').value || '').toLowerCase();
-  let runs = historyRuns;
-  if (ft) {
-    runs = runs.filter(r => ((r.branch||'')+(r.gpu_type||'')+(r.pod_name||'')).toLowerCase().includes(ft));
-  }
-
-  const area = document.getElementById('history-table-area');
-  if (!runs.length) { area.innerHTML = '<div class="placeholder">No runs found.</div>'; return; }
-
-  let html = '<table><thead><tr><th></th><th>Date</th><th>Branch</th><th>Commit</th><th>GPU</th><th>Variant</th><th>Steps</th><th>Best BPB</th><th>Cost</th><th>Status</th><th></th></tr></thead><tbody>';
-  for (const r of runs) {
-    const checked = selectedRuns.has(r.run_id) ? 'checked' : '';
-    const date = (r.started_at||'').slice(0,16).replace('T',' ');
-    const commit = (r.commit_hash||'-').slice(0,7);
-    const bpb = r.best_val_bpb != null ? r.best_val_bpb.toFixed(4) : '-';
-    const cost = r.total_cost != null ? `$${r.total_cost.toFixed(3)}` : '-';
-    let status = '-';
-    if (r.exit_code == null) status = r.finished_at ? '?' : 'running';
-    else if (r.exit_code === 0) status = 'done';
-    else status = `exit ${r.exit_code}`;
-
-    html += `<tr>
-      <td><input type="checkbox" ${checked} onchange="toggleRun('${r.run_id}', this.checked)"></td>
-      <td>${date}</td><td>${r.branch||'-'}</td><td>${commit}</td><td>${r.gpu_type||'-'}</td>
-      <td>${r.data_variant||'-'}</td><td>${r.total_steps||'-'}</td><td>${bpb}</td><td>${cost}</td><td>${status}</td>
-      <td><a href="/api/runs/${r.run_id}/log" target="_blank" style="color:#4a9eff;text-decoration:none;font-size:11px">log</a></td>
-    </tr>`;
-  }
-  html += '</tbody></table>';
-  area.innerHTML = html;
-}
-
-function toggleRun(runId, checked) {
-  if (checked) selectedRuns.add(runId); else selectedRuns.delete(runId);
-  document.getElementById('selection-count').textContent = `${selectedRuns.size} selected`;
-}
-
-function clearSelection() {
-  selectedRuns.clear();
-  document.getElementById('selection-count').textContent = '0 selected';
-  renderHistoryTable();
-}
-
-// ── Compare ──
-let lastCompareData = null; // cached for re-render on chip removal
-
-async function compareSelected() {
-  if (selectedRuns.size < 2) { alert('Select at least 2 runs.'); return; }
-  switchTab('compare');
-
-  const r = await fetch('/api/compare', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ run_ids: [...selectedRuns] })
-  });
-  lastCompareData = await r.json();
-  renderComparison();
-}
-
-function removeFromComparison(runId) {
-  selectedRuns.delete(runId);
-  document.getElementById('selection-count').textContent = `${selectedRuns.size} selected`;
-  if (selectedRuns.size < 2) {
-    // Not enough runs left — clear comparison
-    document.getElementById('compare-selection').style.display = 'none';
-    document.getElementById('compare-charts').innerHTML = '';
-    document.getElementById('compare-summary').innerHTML = '';
-    document.getElementById('compare-placeholder').style.display = '';
-    document.getElementById('compare-placeholder').textContent = 'Select at least 2 runs from the History tab.';
-    lastCompareData = null;
-    renderHistoryTable(); // update checkboxes
-    return;
-  }
-  // Remove from cached data and re-render
-  if (lastCompareData) {
-    delete lastCompareData.metrics[runId];
-    delete lastCompareData.runs[runId];
-    renderComparison();
-  }
-  renderHistoryTable(); // sync checkboxes
-}
-
-function renderComparison() {
-  const data = lastCompareData;
-  if (!data) return;
-
-  document.getElementById('compare-placeholder').style.display = 'none';
-
-  // Selection chips
-  const selEl = document.getElementById('compare-selection');
-  selEl.style.display = 'flex';
-  let chipsHtml = '<span>Comparing:</span>';
-  for (const rid of Object.keys(data.runs)) {
-    const run = data.runs[rid] || {};
-    const label = `${run.branch||''}@${(run.commit_hash||'').slice(0,7)}`;
-    chipsHtml += `<div class="run-chip"><span>${label}</span><span class="chip-x" onclick="removeFromComparison('${rid}')">&times;</span></div>`;
-  }
-  selEl.innerHTML = chipsHtml;
-
-  // Loss comparison chart
-  const lossTraces = [];
-  const bpbTraces = [];
-  let i = 0;
-  for (const [rid, metrics] of Object.entries(data.metrics)) {
-    const run = data.runs[rid] || {};
-    const label = `${run.branch||''}@${(run.commit_hash||'').slice(0,7)}`;
-    const color = COLORS[i % COLORS.length];
-
-    const cmpMetrics = metrics.filter(m => m.train_loss);
-    const trainSteps = cmpMetrics.map(m => m.step);
-    const trainLoss = cmpMetrics.map(m => scaleY(m.train_loss));
-    const trainLossRaw = cmpMetrics.map(m => m.train_loss);
-    if (trainSteps.length) {
-      lossTraces.push({ x: trainSteps, y: trainLoss, customdata: trainLossRaw, name: label, type: 'scatter', line: { color }, hovertemplate: lossHover });
-    }
-
-    const valSteps = metrics.filter(m => m.val_bpb != null).map(m => m.step);
-    const valBpb = metrics.filter(m => m.val_bpb != null).map(m => m.val_bpb);
-    if (valSteps.length) {
-      bpbTraces.push({ x: valSteps, y: valBpb, name: label, mode: 'markers+lines', marker: { color, size: 8 }, line: { color } });
-    }
-    i++;
-  }
-
-  const chartsEl = document.getElementById('compare-charts');
-  chartsEl.innerHTML = '<div class="chart-box" id="cmp-loss"></div><div class="chart-box" id="cmp-bpb"></div>';
-  Plotly.newPlot('cmp-loss', lossTraces, { ...plotLayout, yaxis: lossYAxis, title: 'Training Loss Comparison', height: 300 }, plotConfig);
-  Plotly.newPlot('cmp-bpb', bpbTraces, { ...plotLayout, title: 'Validation BPB Comparison', height: 300 }, plotConfig);
-
-  // Summary table
-  let summaryHtml = '<table><thead><tr><th>Run</th><th>Branch</th><th>GPU</th><th>Steps</th><th>Best BPB</th><th>Cost</th></tr></thead><tbody>';
-  for (const rid of Object.keys(data.runs)) {
-    const run = data.runs[rid] || {};
-    const bpb = run.best_val_bpb != null ? run.best_val_bpb.toFixed(4) : '-';
-    const cost = run.total_cost != null ? `$${run.total_cost.toFixed(3)}` : '-';
-    summaryHtml += `<tr><td>${(run.pod_name||rid).slice(0,20)}</td><td>${run.branch||'-'}</td><td>${run.gpu_type||'-'}</td><td>${run.total_steps||'-'}</td><td>${bpb}</td><td>${cost}</td></tr>`;
-  }
-  summaryHtml += '</tbody></table>';
-  document.getElementById('compare-summary').innerHTML = summaryHtml;
-}
-
-// ── Import Logs ──
-async function openImportDialog() {
-  const dlg = document.getElementById('import-dialog');
-  const list = document.getElementById('import-list');
-  list.innerHTML = '<div class="placeholder">Scanning...</div>';
-  dlg.showModal();
-
-  const files = await fetch('/api/logs').then(r => r.json());
-  if (!files.length) {
-    list.innerHTML = '<div class="placeholder">No log files found.</div>';
-    return;
-  }
-
-  let html = '<table><thead><tr><th>File</th><th>Size</th><th>Status</th><th></th></tr></thead><tbody>';
-  for (const f of files) {
-    const size = (f.size / 1024).toFixed(1) + ' KB';
-    const status = f.imported ? '<span style="color:#4ade80">imported</span>' : '<span style="color:#888">new</span>';
-    const btn = f.imported ? '' : `<button onclick="importSingleLog('${f.path.replace(/'/g,"\\'")}', this)" style="padding:4px 12px;font-size:11px">Import</button>`;
-    html += `<tr><td style="font-size:11px">${f.name}</td><td>${size}</td><td>${status}</td><td>${btn}</td></tr>`;
-  }
-  html += '</tbody></table>';
-  list.innerHTML = html;
-}
-
-async function importSingleLog(path, btn) {
-  btn.disabled = true;
-  btn.textContent = '...';
-  try {
-    const r = await fetch('/api/logs/import', {
-      method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ path })
-    });
-    const result = await r.json();
-    if (result.error) { btn.textContent = 'Error'; return; }
-    btn.parentElement.previousElementSibling.innerHTML = '<span style="color:#4ade80">imported</span>';
-    btn.textContent = `${result.metrics} metrics`;
-    btn.style.border = '1px solid #4ade80';
-    loadHistory();
-  } catch(e) { btn.textContent = 'Failed'; }
-}
-
-async function importAllLogs() {
-  const btn = event.target;
-  btn.disabled = true;
-  btn.textContent = 'Importing...';
-  try {
-    const r = await fetch('/api/logs/import-all', { method: 'POST' });
-    const result = await r.json();
-    btn.textContent = `Imported ${result.imported} logs`;
-    btn.style.border = '1px solid #4ade80';
-    openImportDialog(); // refresh the list
-    loadHistory();
-  } catch(e) { btn.textContent = 'Failed'; }
-}
-
-// ── Init ──
-refreshPods();
-setInterval(refreshPods, 15000);
-</script>
+<script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

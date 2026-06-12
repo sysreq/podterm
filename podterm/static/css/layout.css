@@ -1,0 +1,16 @@
+/* App-level layout: frame, sidebar column, main column, tab views. */
+body { display: flex; height: 100vh; overflow: hidden; }
+
+/* Sidebar */
+#sidebar { width: 220px; background: var(--bg-panel); border-right: 1px solid var(--border);
+           display: flex; flex-direction: column; flex-shrink: 0; }
+#sidebar h2 { padding: 16px; font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+#pod-list { flex: 1; overflow-y: auto; padding: 0 8px; }
+#sidebar-actions { padding: 8px; border-top: 1px solid var(--border); }
+#status { padding: 8px 12px; font-size: 11px; color: var(--text-faint); border-top: 1px solid var(--border); }
+
+/* Main area */
+#main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+#tab-bar { display: flex; background: var(--bg-panel); border-bottom: 1px solid var(--border); }
+.tab-content { display: none; flex: 1; overflow-y: auto; padding: 16px; }
+.tab-content.active { display: flex; flex-direction: column; }

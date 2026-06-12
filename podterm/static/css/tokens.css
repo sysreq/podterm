@@ -1,0 +1,32 @@
+/* Design tokens — single source of truth for palette, type, spacing.
+   Slice 0: values match the pre-split UI exactly; final palette lands in slice 1. */
+:root {
+  /* Surfaces */
+  --bg-app: #1a1a2e;
+  --bg-panel: #16213e;
+  --bg-inset: #0d1117;
+  --border: #2a2a4a;
+  --border-row: #1e1e3a;
+
+  /* Accent */
+  --accent: #4a9eff;
+  --accent-bg: #0f3460;
+  --accent-bg-hover: #1a5276;
+
+  /* Semantic */
+  --success: #4ade80;
+  --danger: #ff4a6e;
+  --danger-bg: #4a1520;
+  --danger-bg-hover: #6a1a2a;
+
+  /* Text */
+  --text-primary: #e0e0e0;
+  --text-secondary: #aaa;
+  --text-muted: #888;
+  --text-faint: #666;
+  --text-ghost: #555;
+
+  /* Type */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+}
