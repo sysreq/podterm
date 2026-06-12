@@ -39,4 +39,5 @@ body {
 #live-view.visible { display: flex; flex-direction: column; gap: var(--sp-3); }
 #kpi-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr));
            gap: var(--sp-3); height: var(--h-kpi); flex-shrink: 0; }
-#live-baseline { display: flex; align-items: center; }
+#race-banner { height: var(--h-banner); flex-shrink: 0; }
+#baseline-row { height: var(--h-baseline); flex-shrink: 0; }

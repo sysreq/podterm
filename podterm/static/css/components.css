@@ -103,6 +103,53 @@
               font-size: var(--fs-sm); line-height: 1.5; max-height: 250px; overflow-y: auto;
               white-space: pre-wrap; word-break: break-all; flex-shrink: 0; }
 
+/* Race status banner */
+#race-banner { display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-4);
+               background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-md); }
+#race-banner.ahead { background: linear-gradient(90deg, rgba(52, 211, 153, 0.10), rgba(52, 211, 153, 0.03));
+                     border-color: rgba(52, 211, 153, 0.40); }
+#race-banner.behind { background: linear-gradient(90deg, rgba(248, 113, 113, 0.10), rgba(248, 113, 113, 0.03));
+                      border-color: rgba(248, 113, 113, 0.40); }
+.race-text { flex: 1; min-width: 0; }
+#race-headline { font-size: var(--fs-lg); font-weight: 700; color: var(--text-primary);
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                 font-variant-numeric: tabular-nums; }
+#race-banner.ahead #race-headline { color: var(--success); }
+#race-banner.behind #race-headline { color: var(--danger); }
+#race-sub { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: 2px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            font-variant-numeric: tabular-nums; }
+.race-progress { flex: 0 0 42%; min-width: 0; }
+.race-bar { position: relative; height: 8px; background: var(--bg-inset); border-radius: 4px; }
+.race-bar-fill { height: 100%; background: var(--accent); border-radius: 4px; width: 0%;
+                 transition: width 0.3s; }
+#race-banner.ahead .race-bar-fill { background: var(--success); }
+#race-banner.behind .race-bar-fill { background: var(--danger); }
+.race-marker { position: absolute; top: -3px; width: 2px; height: 14px; border-radius: 1px;
+               display: none; }
+.race-marker.projected { background: var(--accent); }
+.race-marker.baseline { background: var(--text-primary); opacity: 0.85; }
+.race-bar-labels { display: flex; justify-content: space-between; margin-top: 5px;
+                   font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.race-bar-labels .lab-projected { color: var(--accent); }
+.race-bar-labels .lab-baseline { color: var(--text-secondary); }
+
+/* Baseline row */
+#baseline-row { display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-4);
+                background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-md); }
+#baseline-row label { font-size: var(--fs-xs); color: var(--text-muted); text-transform: uppercase;
+                      letter-spacing: 0.6px; font-weight: 600; }
+#baseline-select { padding: 5px 8px; background: var(--bg-panel-raised); border: 1px solid var(--border);
+                   border-radius: var(--r-sm); color: var(--text-primary); font-size: var(--fs-sm);
+                   width: 320px; max-width: 40%; }
+#baseline-target { font-size: var(--fs-sm); color: var(--text-secondary); flex: 1;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                   font-variant-numeric: tabular-nums; }
+.btn-ghost { font-size: var(--fs-sm); color: var(--accent); text-decoration: none;
+             padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--r-sm);
+             white-space: nowrap; }
+.btn-ghost:hover { background: var(--accent-dim); border-color: var(--accent); }
+
 /* History tab */
 #history-filter { padding: 8px 12px; background: var(--bg-panel); border: 1px solid var(--border);
                   border-radius: var(--r-sm); color: var(--text-primary); width: 300px;
