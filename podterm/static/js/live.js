@@ -1,6 +1,6 @@
 // Live view: KPI card row, loss chart, baseline comparison, log viewer.
 import { app, getPodState, ensurePodStream, hydrateFromDb, on } from './state.js';
-import { scaleY, lossYAxis, lossHover, plotLayout, plotConfig } from './charts.js';
+import { scaleY, initLiveCharts, updateLiveCharts, updateBaselineTrace } from './charts.js';
 import * as d from './derive.js';
 import { fmtInt, fmtMs, fmtDuration, fmtSecShort, fmtClock, fmtMoney, fmtDelta } from './format.js';
 import { kpiCard } from './cards.js';
@@ -303,29 +303,6 @@ function updateKpis(podId) {
   updateBaselineRow(race);
 }
 
-// ── Loss chart (interim — replaced by the dual-chart row in the charts slice) ──
-function lossSeries(state) {
-  const pts = state.metricHistory.filter((m) => m.train_loss > 0);
-  return {
-    x: pts.map((m) => m.step),
-    y: pts.map((m) => scaleY(m.train_loss)),
-    raw: pts.map((m) => m.train_loss),
-  };
-}
-
-function renderLossChart(state) {
-  const series = lossSeries(state);
-  const traces = [
-    { x: series.x, y: series.y, customdata: series.raw,
-      name: 'train_loss', type: 'scatter', line: { color: '#ffd166' }, hovertemplate: lossHover },
-  ];
-  if (state.baselineX.length) {
-    traces.push({ x: state.baselineX, y: state.baselineY, customdata: state.baselineRaw,
-      name: 'baseline', type: 'scatter', line: { color: 'rgba(255,255,255,0.35)', dash: 'dash' }, hovertemplate: lossHover });
-  }
-  Plotly.newPlot('chart-loss', traces, { ...plotLayout, yaxis: lossYAxis, height: 400 }, plotConfig);
-}
-
 function updateLogViewer(state) {
   const viewer = document.getElementById('log-viewer');
   if (!viewer) return;
@@ -343,17 +320,14 @@ export function renderLiveView(podId) {
   document.getElementById('live-view').classList.add('visible');
   document.getElementById('btn-full-log').href = `/api/runs/${podId}/log`;
   buildKpiRow();
+  initLiveCharts();
   updateKpis(podId);
   updateLogViewer(state);
-  renderLossChart(state);
+  updateLiveCharts(state);
+  updateBaselineTrace(state);
 
   // Populate baseline selector and restore saved selection
   loadBaselineOptions(podId);
-
-  // Clear stale diffs from previously viewed pod, then restore if we have data
-  document.getElementById('diff-loss').innerHTML = '';
-  document.getElementById('diff-time').innerHTML = '';
-  if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
 }
 
 // ── Baseline ──
@@ -394,11 +368,9 @@ async function onBaselineChange() {
   state.baselineX = [];
   state.baselineY = [];
   state.baselineRaw = [];
-  document.getElementById('diff-loss').innerHTML = '';
-  document.getElementById('diff-time').innerHTML = '';
 
   if (!runId) {
-    renderLossChart(state);
+    updateBaselineTrace(state);
     updateKpis(podId);
     return;
   }
@@ -418,56 +390,18 @@ async function onBaselineChange() {
   state.baselineY = baselineMetrics.map((m) => scaleY(m.train_loss));
   state.baselineRaw = baselineMetrics.map((m) => m.train_loss);
 
-  renderLossChart(state);
+  updateBaselineTrace(state);
   updateKpis(podId);
-  if (state.lastMetric) updateBaselineDiffs(state.lastMetric);
-}
-
-function updateBaselineDiffs(m) {
-  if (!app.activePod) return;
-  const state = getPodState(app.activePod);
-  const diffEl = document.getElementById('diff-loss');
-  const timeEl = document.getElementById('diff-time');
-  if (!diffEl) return;
-  if (!state.baselineRunId || !state.baselineSteps.length) {
-    diffEl.innerHTML = '';
-    timeEl.innerHTML = '';
-    return;
-  }
-
-  const b = d.baselineAtStep(state.baselineByStep, state.baselineSteps, m.step);
-  if (!b) return;
-
-  // Loss diff (negative = better)
-  if (m.train_loss > 0 && b.train_loss) {
-    const delta = m.train_loss - b.train_loss;
-    const color = delta <= 0 ? 'var(--success)' : 'var(--danger)';
-    diffEl.innerHTML = `<span style="color:${color};font-weight:600">(${fmtDelta(delta, 4)})</span>`;
-  }
-
-  const pace = d.paceDelta(m, b);
-  if (pace) {
-    const stepColor = pace.perStepMs <= 0 ? 'var(--success)' : 'var(--danger)';
-    const wallColor = pace.cumulativeMs <= 0 ? 'var(--success)' : 'var(--danger)';
-    const label = pace.cumulativeMs <= 0 ? 'ahead' : 'behind';
-    timeEl.innerHTML =
-      `<span style="color:${stepColor}">${fmtDelta(pace.perStepMs, 1)}ms</span>` +
-      `<span style="color:var(--text-ghost)"> / </span>` +
-      `<span style="color:${wallColor}">${fmtSecShort(pace.cumulativeMs)} ${label}</span>`;
-  }
 }
 
 // ── Bus subscriptions + static element wiring ──
 export function initLive() {
   document.getElementById('baseline-select').addEventListener('change', onBaselineChange);
 
-  on('pod:metric', ({ podId, m, trainPoint }) => {
+  on('pod:metric', ({ podId }) => {
     if (app.activePod !== podId || !cards) return;
-    if (trainPoint && document.getElementById('chart-loss')?.data) {
-      Plotly.extendTraces('chart-loss', { x: [[m.step]], y: [[scaleY(m.train_loss)]], customdata: [[m.train_loss]] }, [0]);
-    }
+    updateLiveCharts(getPodState(podId));
     updateKpis(podId);
-    updateBaselineDiffs(m);
   });
 
   on('pod:log', ({ podId }) => {
@@ -482,17 +416,15 @@ export function initLive() {
     });
   }
 
-  on('pod:reset', ({ podId }) => {
-    if (app.activePod !== podId || !cards) return;
-    renderLossChart(getPodState(podId));
-    updateKpis(podId);
-  });
-
-  on('pod:hydrated', ({ podId }) => {
-    if (app.activePod !== podId || !cards) return;
-    renderLossChart(getPodState(podId));
-    updateKpis(podId);
-  });
+  for (const evt of ['pod:reset', 'pod:hydrated']) {
+    on(evt, ({ podId }) => {
+      if (app.activePod !== podId || !cards) return;
+      const state = getPodState(podId);
+      updateLiveCharts(state);
+      updateBaselineTrace(state);
+      updateKpis(podId);
+    });
+  }
 
   // Wall-clock cards (cost, ETA clock) tick even between metric events.
   setInterval(() => {

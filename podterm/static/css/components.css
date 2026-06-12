@@ -96,8 +96,18 @@
                 padding: 1px 8px; margin-bottom: 2px; }
 .bar-meter { height: 6px; background: var(--bg-inset); border-radius: 3px; overflow: hidden; margin-top: 9px; }
 .bar-meter-fill { height: 100%; background: var(--accent); border-radius: 3px; width: 0%; transition: width 0.3s; }
-#live-charts .chart-box { background: var(--bg-panel); border: 1px solid var(--border);
-                          border-radius: var(--r-md); padding: 4px; }
+#charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3);
+              height: var(--h-chart); flex-shrink: 0; }
+#charts-row .chart-box { background: var(--bg-panel); border: 1px solid var(--border);
+                         border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3);
+                         display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.chart-header { display: flex; align-items: center; justify-content: space-between;
+                gap: var(--sp-2); margin-bottom: 2px; flex-shrink: 0; }
+.chart-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-secondary); }
+.chip-pending { font-size: 9px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+                color: var(--text-muted); border: 1px dashed var(--border-strong);
+                border-radius: var(--r-pill); padding: 2px 8px; white-space: nowrap; }
+.chart-plot { flex: 1; min-height: 0; }
 #log-viewer { margin-top: var(--sp-2); background: var(--bg-inset); border: 1px solid var(--border);
               border-radius: var(--r-md); padding: var(--sp-3); font-family: var(--font-mono);
               font-size: var(--fs-sm); line-height: 1.5; max-height: 250px; overflow-y: auto;

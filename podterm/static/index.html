@@ -75,14 +75,17 @@
         <span id="baseline-target"></span>
         <a id="btn-full-log" class="btn-ghost" target="_blank" rel="noopener">View Full Log</a>
       </div>
-      <div id="live-charts">
-        <div class="chart-box chart-wide">
-          <div id="chart-loss-header" style="display:flex;align-items:baseline;padding:4px 8px 0;font-size:13px">
-            <span id="diff-loss" style="margin-right:8px"></span>
-            <span style="color:var(--text-secondary);font-weight:600;flex:1;text-align:center">Training Loss</span>
-            <span id="diff-time" style="margin-left:8px"></span>
+      <div id="charts-row">
+        <div class="chart-box">
+          <div class="chart-header"><span class="chart-title">Training Loss</span></div>
+          <div id="chart-loss" class="chart-plot"></div>
+        </div>
+        <div class="chart-box">
+          <div class="chart-header">
+            <span class="chart-title">Step Time / Throughput</span>
+            <span class="chip-pending">samples/s — awaiting emitter</span>
           </div>
-          <div id="chart-loss"></div>
+          <div id="chart-step" class="chart-plot"></div>
         </div>
       </div>
       <div id="log-viewer"></div>
