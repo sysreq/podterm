@@ -66,21 +66,22 @@
   --fs-kpi: 26px;
   --fs-hero: 30px;
 
-  /* Fixed region heights — the no-layout-shift contract */
+  /* Fixed region heights — the no-layout-shift contract.
+     Sum + gaps + padding fits a 1080p viewport with zero vertical scroll:
+     52 nav + 32 pad + 5×12 gaps + 108+56+44+300+136+292 = 1080. */
   --h-nav: 52px;
   --w-sidebar: 240px;
-  --h-kpi: 116px;
-  --h-banner: 64px;
-  --h-baseline: 48px;
-  --h-chart: 340px;
-  --h-diag: 152px;
-  --h-bottom: 320px;
+  --h-kpi: 108px;
+  --h-banner: 56px;
+  --h-baseline: 44px;
+  --h-chart: 300px;
+  --h-diag: 136px;
+  --h-bottom: 292px;
 }
 
 @media (max-width: 1600px) {
   :root {
     --fs-kpi: 21px;
     --fs-hero: 25px;
-    --h-chart: 300px;
   }
 }
