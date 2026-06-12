@@ -4,6 +4,8 @@ import { scaleY, initLiveCharts, updateLiveCharts, updateBaselineTrace } from '.
 import * as d from './derive.js';
 import { fmtInt, fmtMs, fmtDuration, fmtSecShort, fmtClock, fmtMoney, fmtDelta } from './format.js';
 import { kpiCard } from './cards.js';
+import { renderLogs } from './logs.js';
+import { renderConfigPanel } from './configpanel.js';
 
 let cards = null;
 let diag = null;
@@ -344,13 +346,6 @@ function updateKpis(podId) {
   updateBaselineRow(race);
 }
 
-function updateLogViewer(state) {
-  const viewer = document.getElementById('log-viewer');
-  if (!viewer) return;
-  viewer.textContent = state.logLines.map((l) => l.text).join('\n') + (state.logLines.length ? '\n' : '');
-  viewer.scrollTop = viewer.scrollHeight;
-}
-
 // ── Live View ──
 export function renderLiveView(podId) {
   ensurePodStream(podId);
@@ -363,9 +358,10 @@ export function renderLiveView(podId) {
   buildKpiRow();
   initLiveCharts();
   updateKpis(podId);
-  updateLogViewer(state);
   updateLiveCharts(state);
   updateBaselineTrace(state);
+  renderLogs(podId);
+  renderConfigPanel(podId);
 
   // Populate baseline selector and restore saved selection
   loadBaselineOptions(podId);
@@ -391,6 +387,7 @@ async function loadBaselineOptions(podId) {
       sel.appendChild(opt);
     }
     updateKpis(podId); // runRow may unlock the cost card
+    renderConfigPanel(podId); // …and the config rows
   } catch {}
   const state = getPodState(podId);
   if (state.baselineRunId) sel.value = state.baselineRunId;
@@ -443,11 +440,6 @@ export function initLive() {
     if (app.activePod !== podId || !cards) return;
     updateLiveCharts(getPodState(podId));
     updateKpis(podId);
-  });
-
-  on('pod:log', ({ podId }) => {
-    if (app.activePod !== podId) return;
-    updateLogViewer(getPodState(podId));
   });
 
   for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase']) {

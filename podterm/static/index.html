@@ -89,7 +89,28 @@
         </div>
       </div>
       <div id="diag-row"></div>
-      <div id="log-viewer"></div>
+      <div id="bottom-row">
+        <div id="logs-panel">
+          <div class="panel-header">
+            <span class="chart-title">Logs</span>
+            <div id="log-tabs">
+              <button class="log-tab active" data-level="all">All</button>
+              <button class="log-tab" data-level="warn">Warnings</button>
+              <button class="log-tab" data-level="error">Errors</button>
+              <button class="log-tab" data-level="metric">Metrics</button>
+            </div>
+            <input id="log-filter" placeholder="Filter…" spellcheck="false">
+            <button id="log-pause" title="Pause autoscroll">Pause</button>
+          </div>
+          <div id="log-lines"></div>
+          <button id="log-resume" hidden>Resume ▼ <span id="log-new-count">0</span> new</button>
+        </div>
+        <div id="config-panel">
+          <div class="panel-header"><span class="chart-title">Config / Repro</span></div>
+          <div id="config-rows"></div>
+          <button id="btn-full-config" class="btn-ghost">View Full Config (JSON)</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -157,6 +178,15 @@
   <div class="btn-row">
     <button id="btn-do-launch" class="primary">Launch</button>
     <button id="btn-launch-cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- Full Config Dialog -->
+<dialog id="config-dialog">
+  <h3>Full Config (JSON)</h3>
+  <pre id="config-json"></pre>
+  <div class="btn-row">
+    <button id="btn-config-close">Close</button>
   </div>
 </dialog>
 

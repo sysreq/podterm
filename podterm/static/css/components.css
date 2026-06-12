@@ -112,10 +112,59 @@
                 color: var(--text-muted); border: 1px dashed var(--border-strong);
                 border-radius: var(--r-pill); padding: 2px 8px; white-space: nowrap; }
 .chart-plot { flex: 1; min-height: 0; }
-#log-viewer { margin-top: var(--sp-2); background: var(--bg-inset); border: 1px solid var(--border);
-              border-radius: var(--r-md); padding: var(--sp-3); font-family: var(--font-mono);
-              font-size: var(--fs-sm); line-height: 1.5; max-height: 250px; overflow-y: auto;
-              white-space: pre-wrap; word-break: break-all; flex-shrink: 0; }
+/* Bottom row: logs + config */
+#bottom-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+              gap: var(--sp-3); height: var(--h-bottom); flex-shrink: 0; }
+#logs-panel, #config-panel { background: var(--bg-panel); border: 1px solid var(--border);
+                             border-radius: var(--r-md); display: flex; flex-direction: column;
+                             overflow: hidden; position: relative; min-width: 0; }
+.panel-header { display: flex; align-items: center; gap: var(--sp-3);
+                padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border);
+                flex-shrink: 0; min-height: 40px; }
+#log-tabs { display: flex; gap: 2px; }
+.log-tab { font-size: var(--fs-xs); padding: 3px 10px; border-radius: var(--r-pill);
+           border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
+.log-tab:hover { color: var(--text-primary); }
+.log-tab.active { background: var(--accent-dim); color: var(--accent); }
+#log-filter { margin-left: auto; width: 150px; padding: 4px 8px; background: var(--bg-inset);
+              border: 1px solid var(--border); border-radius: var(--r-sm);
+              color: var(--text-primary); font-size: var(--fs-xs); }
+#log-pause { background: transparent; border: 1px solid var(--border); border-radius: var(--r-sm);
+             color: var(--text-muted); cursor: pointer; font-size: var(--fs-xs); padding: 3px 10px; }
+#log-pause.paused { color: var(--warn); border-color: var(--warn); }
+#log-lines { flex: 1; overflow-y: auto; padding: var(--sp-2) var(--sp-3);
+             font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55;
+             background: var(--bg-inset); }
+.log-line { white-space: pre-wrap; word-break: break-all; color: var(--text-secondary); }
+.log-line.lvl-metric { color: var(--metric-cyan); }
+.log-line.lvl-warn { color: var(--warn); }
+.log-line.lvl-error { color: var(--danger); }
+.log-line.log-latest { background: var(--accent-dim); border-radius: 3px; }
+.log-empty { color: var(--text-muted); font-family: var(--font-ui); font-size: var(--fs-sm);
+             padding: var(--sp-4) 0; text-align: center; }
+#log-resume { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+              background: var(--accent-strong); color: #fff; border: none;
+              border-radius: var(--r-pill); padding: 5px 14px; font-size: var(--fs-xs);
+              cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
+
+/* Config / Repro panel */
+#config-rows { flex: 1; overflow-y: auto; }
+.cfg-row { display: flex; align-items: center; gap: var(--sp-2);
+           padding: 7px var(--sp-3); border-bottom: 1px solid var(--border-row);
+           font-size: var(--fs-sm); }
+.cfg-label { color: var(--text-muted); width: 112px; flex-shrink: 0; font-size: 10px;
+             text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+.cfg-value { color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-sm);
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.cfg-value.pending { color: var(--text-muted); font-family: var(--font-ui); }
+.cfg-copy { background: transparent; border: none; color: var(--text-muted); cursor: pointer;
+            font-size: 13px; flex-shrink: 0; padding: 0 2px; }
+.cfg-copy:hover { color: var(--accent); }
+#config-panel .btn-ghost { margin: var(--sp-2) var(--sp-3) var(--sp-3); text-align: center;
+                           background: transparent; cursor: pointer; }
+#config-json { background: var(--bg-inset); padding: var(--sp-3); border-radius: var(--r-sm);
+               font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+               max-height: 55vh; overflow: auto; }
 
 /* Race status banner */
 #race-banner { display: flex; align-items: center; gap: var(--sp-5); padding: 0 var(--sp-4);
