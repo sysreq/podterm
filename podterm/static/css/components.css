@@ -68,9 +68,6 @@
 .kpi-label-text { overflow: hidden; text-overflow: ellipsis; }
 .kpi-info { cursor: help; font-size: 11px; color: var(--text-faint);
             position: absolute; top: 7px; right: 8px; }
-@media (max-width: 1600px) {
-  .kpi-label { font-size: 9px; letter-spacing: 0.1px; }
-}
 .kpi-value { font-size: var(--fs-kpi); font-weight: 700; color: var(--text-primary);
              font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 2px;
              white-space: nowrap; min-height: calc(var(--fs-kpi) * 1.2); }
@@ -80,7 +77,8 @@
 .kpi-sub.success { color: var(--success); }
 .kpi-sub.danger { color: var(--danger); }
 .kpi-caption { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-               margin-top: 2px; min-height: 13px; }
+               margin-top: 2px; min-height: 13px; white-space: nowrap; overflow: hidden;
+               text-overflow: ellipsis; }
 .kpi-caption.success { color: var(--success); }
 .kpi-caption.danger { color: var(--danger); }
 .kpi-foot { margin-top: auto; height: 26px; min-height: 26px; }
@@ -100,6 +98,15 @@
 /* Diagnostics row variant: taller sparkline, roomier sub line */
 .kpi-card.diag .kpi-foot { height: 46px; min-height: 46px; }
 .kpi-card.diag .kpi-sub { margin-top: 4px; }
+
+/* Narrow viewports: 9 KPI cards leave ~120px each — shrink card type */
+@media (max-width: 1600px) {
+  .kpi-card { padding: 9px 8px; }
+  .kpi-label { font-size: 8.5px; letter-spacing: 0.1px; padding-right: 10px; }
+  .kpi-card:not(.diag) .kpi-value { font-size: 19px; }
+  .kpi-card:not(.diag) .kpi-sub { font-size: 10px; }
+  .kpi-caption { font-size: 9px; letter-spacing: 0.6px; }
+}
 #charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3);
               height: var(--h-chart); flex-shrink: 0; }
 #charts-row .chart-box { background: var(--bg-panel); border: 1px solid var(--border);

@@ -17,22 +17,24 @@ function buildKpiRow() {
   cards = {
     projected: kpiCard({ label: 'Projected Finish', spark: true,
       tooltip: 'Remaining steps × EMA-50 of step time; sparkline shows recent ms/step' }),
-    hero: kpiCard({ label: 'Ahead / Behind', hero: true,
-      tooltip: 'Per-step ms delta vs baseline, and cumulative time ahead or behind — independent quantities' }),
+    hero: kpiCard({ label: 'Baseline', hero: true,
+      tooltip: 'Race vs the selected baseline: per-step ms delta and cumulative time ahead or behind — independent quantities' }),
     avg: kpiCard({ label: 'Avg ms/step',
       tooltip: 'EMA-100 of step time; the target is the pace needed from here to beat the baseline' }),
     loss: kpiCard({ label: 'Loss (train)',
       tooltip: 'Latest training loss, with change vs ~100 steps earlier' }),
-    bpb: kpiCard({ label: 'BPB (val)',
-      tooltip: 'Validation bits per byte at the last eval (train BPB is not in the event stream)' }),
+    cpu: kpiCard({ label: 'CPU Usage', bar: true,
+      tooltip: 'Container CPU utilization from RunPod telemetry' }),
+    ram: kpiCard({ label: 'RAM Usage', bar: true,
+      tooltip: 'Container memory utilization from RunPod telemetry' }),
+    gpu: kpiCard({ label: 'GPU Usage', bar: true,
+      tooltip: 'GPU busy percentage from RunPod telemetry' }),
+    gpumem: kpiCard({ label: 'GPU Memory', bar: true,
+      tooltip: 'Live GPU memory vs device total while running; trainer-reported peak after the run' }),
     cost: kpiCard({ label: 'Cost So Far',
       tooltip: 'Wall-clock elapsed × hourly rate from pod metadata, plus projected total at current pace' }),
-    gpu: kpiCard({ label: 'GPU Utilization', bar: true,
-      tooltip: 'GPU busy percentage from RunPod telemetry; sub-line shows container CPU and RAM' }),
-    mem: kpiCard({ label: 'Memory (GPU)', bar: true,
-      tooltip: 'Peak allocated GPU memory vs device total (total parsed from the GPU name)' }),
   };
-  for (const key of ['projected', 'hero', 'avg', 'loss', 'bpb', 'cost', 'gpu', 'mem']) {
+  for (const key of ['projected', 'hero', 'avg', 'loss', 'cpu', 'ram', 'gpu', 'gpumem', 'cost']) {
     row.appendChild(cards[key].el);
   }
 
@@ -107,59 +109,59 @@ function updateCostCard(state, pod, eta) {
   });
 }
 
-function updateGpuCard(state, pod) {
-  const t = state.telemetry;
-  const running = pod.desiredStatus === 'RUNNING';
-  if (running && t && t.gpu_util_pct != null) {
-    cards.gpu.set({
-      value: String(Math.round(t.gpu_util_pct)), unit: '%',
-      sub: `CPU ${Math.round(t.cpu_pct ?? 0)}% · RAM ${Math.round(t.mem_pct ?? 0)}%`,
-    });
-    cards.gpu.bar.set(t.gpu_util_pct / 100);
-    return;
-  }
-  cards.gpu.note(running ? 'Polling RunPod telemetry…' : 'Pod not running — no live telemetry');
-  if (cards.gpu.bar) cards.gpu.bar.set(0);
+function pctCard(card, pct, sub = '') {
+  card.set({ value: String(Math.round(pct)), unit: '%', sub });
+  card.bar.set(pct / 100);
 }
 
-function updateMemCard(state, pod) {
+function updateTelemetryCards(state, pod) {
+  const t = state.telemetry;
+  const running = pod.desiredStatus === 'RUNNING';
+  const live = running && t;
+
+  if (live && t.cpu_pct != null) pctCard(cards.cpu, t.cpu_pct);
+  else noteTelemetry(cards.cpu, running);
+  if (live && t.mem_pct != null) pctCard(cards.ram, t.mem_pct);
+  else noteTelemetry(cards.ram, running);
+  if (live && t.gpu_util_pct != null) pctCard(cards.gpu, t.gpu_util_pct);
+  else noteTelemetry(cards.gpu, running);
+
+  // GPU memory: live used/total while running; trainer-reported peak after.
   const gpuName = state.info.gpu_type || state.runRow?.gpu_type || podGpuName(pod);
   const totalGiB = d.parseGpuMemGiB(gpuName);
-  const t = state.telemetry;
-
-  // Live GPU-memory utilization while the pod runs; falls back to the
-  // trainer's end-of-run peak below.
-  if (pod.desiredStatus === 'RUNNING' && t && t.gpu_mem_pct != null) {
+  if (live && t.gpu_mem_pct != null) {
     if (totalGiB) {
       const usedGiB = (t.gpu_mem_pct / 100) * totalGiB;
-      cards.mem.set({
-        value: `${usedGiB.toFixed(1)} / ${totalGiB}`, unit: 'GB',
+      cards.gpumem.set({
+        value: `${usedGiB.toFixed(1)}/${totalGiB}`, unit: 'GB',
         sub: `${Math.round(t.gpu_mem_pct)}% of device · live`,
       });
     } else {
-      cards.mem.set({ value: String(Math.round(t.gpu_mem_pct)), unit: '%',
+      cards.gpumem.set({ value: String(Math.round(t.gpu_mem_pct)), unit: '%',
         sub: 'Live · device total unknown' });
     }
-    cards.mem.bar.set(t.gpu_mem_pct / 100);
-    return;
-  }
-
-  if (!state.memory) {
-    cards.mem.note(state.finished ? 'No memory stats recorded' : 'Reported at run end');
-    if (cards.mem.bar) cards.mem.bar.set(0);
-    return;
-  }
-  const usedGiB = state.memory.peak_mib / 1024;
-  if (totalGiB) {
-    cards.mem.set({
-      value: `${usedGiB.toFixed(1)} / ${totalGiB}`, unit: 'GB',
-      sub: `Reserved ${(state.memory.reserved_mib / 1024).toFixed(1)} GB`,
-    });
-    cards.mem.bar.set(usedGiB / totalGiB);
+    cards.gpumem.bar.set(t.gpu_mem_pct / 100);
+  } else if (state.memory) {
+    const usedGiB = state.memory.peak_mib / 1024;
+    if (totalGiB) {
+      cards.gpumem.set({
+        value: `${usedGiB.toFixed(1)}/${totalGiB}`, unit: 'GB',
+        sub: `Peak · reserved ${(state.memory.reserved_mib / 1024).toFixed(1)} GB`,
+      });
+      cards.gpumem.bar.set(usedGiB / totalGiB);
+    } else {
+      cards.gpumem.set({ value: usedGiB.toFixed(1), unit: 'GB peak', sub: 'Device memory total unknown' });
+      cards.gpumem.bar.set(0);
+    }
   } else {
-    cards.mem.set({ value: usedGiB.toFixed(1), unit: 'GB peak', sub: 'Device memory total unknown' });
-    cards.mem.bar.set(0);
+    cards.gpumem.note(state.finished ? 'No memory stats recorded' : 'Reported at run end');
+    cards.gpumem.bar.set(0);
   }
+}
+
+function noteTelemetry(card, running) {
+  card.note(running ? 'Polling RunPod telemetry…' : 'Pod not running');
+  if (card.bar) card.bar.set(0);
 }
 
 // ── Race banner + baseline row (numbers shared with the KPI cards by construction) ──
@@ -259,8 +261,7 @@ function updateKpis(podId) {
   const m = state.lastMetric;
   const running = pod.desiredStatus === 'RUNNING';
 
-  updateGpuCard(state, pod);
-  updateMemCard(state, pod);
+  updateTelemetryCards(state, pod);
   updateDiagRow(state);
 
   if (!m) {
@@ -270,7 +271,6 @@ function updateKpis(podId) {
     cards.hero.note(waitMsg);
     cards.avg.note(waitMsg);
     cards.loss.note(waitMsg);
-    cards.bpb.note(waitMsg);
     updateCostCard(state, pod, null);
     updateRaceBanner(state, null, null, null);
     updateBaselineRow(null);
@@ -358,21 +358,8 @@ function updateKpis(podId) {
     else cards.loss.note('No training loss yet…');
   }
 
-  // 5 — BPB (val)
-  const ed = d.evalDelta(state.evals);
-  if (ed) {
-    cards.bpb.set({
-      value: ed.current.toFixed(4),
-      sub: ed.delta != null
-        ? `${fmtDelta(ed.delta, 4)} vs prev eval`
-        : `First eval @ ${fmtInt(ed.step)}`,
-      subClass: ed.delta == null ? '' : (ed.delta <= 0 ? 'success' : 'danger'),
-    });
-  } else {
-    cards.bpb.note('No eval completed yet…');
-  }
-
-  // 6 — Cost
+  // Cost (val BPB lives in the diagnostics row below the charts — it only
+  // materializes at evals, not live)
   updateCostCard(state, pod, eta);
 
   // Race banner + baseline row read the same race object as cards 2 and 3.
