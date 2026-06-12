@@ -46,6 +46,7 @@ from podterm.parser import (
 )
 from podterm.runpod import (
     api_create_pod,
+    api_get_telemetry,
     api_terminate_pod,
     create_or_update_template,
     detect_redis_server,
@@ -191,6 +192,30 @@ def _sse_send(pod_id: str, event_type: str, data: dict) -> None:
             pass
 
 
+# ---------------------------------------------------------------------------
+# Telemetry loop — polls RunPod for live utilization, fans out to SSE
+# ---------------------------------------------------------------------------
+
+TELEMETRY_POLL_SEC = 5.0
+
+
+async def telemetry_loop() -> None:
+    """Poll utilization for all pods and emit SSE `telemetry` events.
+
+    Only polls while at least one browser is subscribed — no API traffic
+    when nobody is watching. _sse_send drops events for unwatched pods.
+    """
+    while True:
+        try:
+            if any(sse_subscribers.values()):
+                telemetry = await asyncio.to_thread(api_get_telemetry)
+                for pod_id, t in telemetry.items():
+                    _sse_send(pod_id, "telemetry", t)
+        except Exception:
+            pass  # transient API failures just skip a tick
+        await asyncio.sleep(TELEMETRY_POLL_SEC)
+
+
 def _finalize_run(pod_id: str) -> None:
     try:
         summary = run_summary.pop(pod_id, None)
@@ -232,8 +257,9 @@ def _connect_pod(pod_id: str, pod_name: str, cost_per_hr=None) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start drain loop
+    # Start drain loop + telemetry poller
     task = asyncio.create_task(drain_loop())
+    telemetry_task = asyncio.create_task(telemetry_loop())
 
     # Auto-open browser after a short delay
     async def _open_browser():
@@ -255,6 +281,7 @@ async def lifespan(app: FastAPI):
 
     # Cleanup
     task.cancel()
+    telemetry_task.cancel()
     for p in pollers.values():
         p.stop()
     db.close()

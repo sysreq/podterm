@@ -8,4 +8,4 @@ Pod-side daemon (`gpt-golf/scripts/pod_eventd.py`) serves structured JSONL event
 
 - The live path consumes structured events only — `parser.py` is import-only (legacy `/api/logs*` endpoints for local `.log` files). Keep the event schema in sync with the producers in gpt-golf (`bootstrap.sh` `emit`, `train_gpt.py` `emit_event`) — schema changes need a gpt-golf image rebuild + push.
 - The phase strings `"Starting Training"` and `"Training finished"` are load-bearing in `drain_loop` and the UI.
-- All RunPod interaction goes through the `runpodctl` CLI (podterm/runpod.py), never the GraphQL API directly.
+- All RunPod interaction goes through the `runpodctl` CLI (podterm/runpod.py), with one sanctioned exception: `api_get_telemetry()` calls the GraphQL API directly (read-only `myself.pods.runtime` query) because the REST API behind runpodctl exposes no CPU/GPU/memory utilization fields. Keep any future GraphQL use confined to podterm/runpod.py.

@@ -27,15 +27,14 @@ function buildKpiRow() {
       tooltip: 'Validation bits per byte at the last eval (train BPB is not in the event stream)' }),
     cost: kpiCard({ label: 'Cost So Far',
       tooltip: 'Wall-clock elapsed × hourly rate from pod metadata, plus projected total at current pace' }),
-    gpu: kpiCard({ label: 'GPU Utilization',
-      tooltip: 'GPU busy percentage' }),
+    gpu: kpiCard({ label: 'GPU Utilization', bar: true,
+      tooltip: 'GPU busy percentage from RunPod telemetry; sub-line shows container CPU and RAM' }),
     mem: kpiCard({ label: 'Memory (GPU)', bar: true,
       tooltip: 'Peak allocated GPU memory vs device total (total parsed from the GPU name)' }),
   };
   for (const key of ['projected', 'hero', 'avg', 'loss', 'bpb', 'cost', 'gpu', 'mem']) {
     row.appendChild(cards[key].el);
   }
-  cards.gpu.note('Awaiting emitter', { pending: true });
 
   // Diagnostics row — 4 metrics await emitters in gpt-golf; Validation BPB is live.
   const diagRow = document.getElementById('diag-row');
@@ -108,9 +107,43 @@ function updateCostCard(state, pod, eta) {
   });
 }
 
+function updateGpuCard(state, pod) {
+  const t = state.telemetry;
+  const running = pod.desiredStatus === 'RUNNING';
+  if (running && t && t.gpu_util_pct != null) {
+    cards.gpu.set({
+      value: String(Math.round(t.gpu_util_pct)), unit: '%',
+      sub: `CPU ${Math.round(t.cpu_pct ?? 0)}% · RAM ${Math.round(t.mem_pct ?? 0)}%`,
+    });
+    cards.gpu.bar.set(t.gpu_util_pct / 100);
+    return;
+  }
+  cards.gpu.note(running ? 'Polling RunPod telemetry…' : 'Pod not running — no live telemetry');
+  if (cards.gpu.bar) cards.gpu.bar.set(0);
+}
+
 function updateMemCard(state, pod) {
   const gpuName = state.info.gpu_type || state.runRow?.gpu_type || podGpuName(pod);
   const totalGiB = d.parseGpuMemGiB(gpuName);
+  const t = state.telemetry;
+
+  // Live GPU-memory utilization while the pod runs; falls back to the
+  // trainer's end-of-run peak below.
+  if (pod.desiredStatus === 'RUNNING' && t && t.gpu_mem_pct != null) {
+    if (totalGiB) {
+      const usedGiB = (t.gpu_mem_pct / 100) * totalGiB;
+      cards.mem.set({
+        value: `${usedGiB.toFixed(1)} / ${totalGiB}`, unit: 'GB',
+        sub: `${Math.round(t.gpu_mem_pct)}% of device · live`,
+      });
+    } else {
+      cards.mem.set({ value: String(Math.round(t.gpu_mem_pct)), unit: '%',
+        sub: 'Live · device total unknown' });
+    }
+    cards.mem.bar.set(t.gpu_mem_pct / 100);
+    return;
+  }
+
   if (!state.memory) {
     cards.mem.note(state.finished ? 'No memory stats recorded' : 'Reported at run end');
     if (cards.mem.bar) cards.mem.bar.set(0);
@@ -226,6 +259,7 @@ function updateKpis(podId) {
   const m = state.lastMetric;
   const running = pod.desiredStatus === 'RUNNING';
 
+  updateGpuCard(state, pod);
   updateMemCard(state, pod);
   updateDiagRow(state);
 
@@ -442,7 +476,7 @@ export function initLive() {
     updateKpis(podId);
   });
 
-  for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase']) {
+  for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase', 'pod:telemetry']) {
     on(evt, ({ podId }) => {
       if (app.activePod !== podId) return;
       updateKpis(podId);

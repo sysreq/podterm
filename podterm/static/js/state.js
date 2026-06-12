@@ -34,6 +34,8 @@ function freshState() {
     logLines: [],      // {text, level, step|null}
     info: {},          // gpu_type, gpu_count, commit_hash, commit_msg, model_params
     memory: null,      // {peak_mib, reserved_mib}
+    telemetry: null,   // {cpu_pct, mem_pct, gpu_util_pct, gpu_mem_pct, uptime_s}
+    telemetryHistory: [], // recent gpu_util_pct samples
     summary: null,     // {final_val_bpb, best_val_bpb, final_val_loss}
     phase: null,
     finished: false,
@@ -157,6 +159,16 @@ export function ensurePodStream(podId) {
   es.addEventListener('memory', (e) => {
     state.memory = JSON.parse(e.data);
     emit('pod:memory', { podId, memory: state.memory });
+  });
+
+  es.addEventListener('telemetry', (e) => {
+    const t = JSON.parse(e.data);
+    state.telemetry = t;
+    if (t.gpu_util_pct != null) {
+      state.telemetryHistory.push(t.gpu_util_pct);
+      if (state.telemetryHistory.length > 120) state.telemetryHistory.splice(0, 20);
+    }
+    emit('pod:telemetry', { podId, telemetry: t });
   });
 
   es.addEventListener('info', (e) => {
