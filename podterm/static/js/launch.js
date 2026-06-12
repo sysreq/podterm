@@ -89,7 +89,7 @@ async function doLaunch() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
     });
     const result = await r.json();
-    setStatus(`Launched ${result.name} ($${result.cost_per_hr}/hr)`);
+    setStatus(`Run launched: ${result.name} ($${result.cost_per_hr}/hr)`);
     emit('pods:refresh', {});
     emit('pod:select', { podId: result.pod_id });
   } catch (e) {

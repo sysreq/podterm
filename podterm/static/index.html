@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PodTerm v2.0</title>
+<title>PODTERM</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/base.css">
@@ -12,24 +12,39 @@
 </head>
 <body>
 
-<div id="sidebar">
-  <h2>PodTerm</h2>
-  <div id="pod-list"></div>
-  <div id="sidebar-actions">
-    <button id="btn-launch">Launch</button>
-    <button id="btn-stop" class="danger">Stop</button>
-    <button id="btn-refresh">Refresh</button>
-  </div>
-  <div id="status">Loading...</div>
-</div>
-
-<div id="main">
-  <div id="tab-bar">
+<header id="topnav">
+  <div id="brand"><span class="brand-dot"></span>PODTERM</div>
+  <nav id="tab-bar">
     <div class="tab active" data-tab="live">Live</div>
     <div class="tab" data-tab="history">History</div>
     <div class="tab" data-tab="compare">Compare</div>
+    <div class="tab" data-tab="machines">Machines</div>
+  </nav>
+  <div id="topnav-right">
+    <div id="cluster-pill"><span class="pill-dot"></span><span id="cluster-pill-text">Connecting…</span></div>
+    <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
+    <div id="avatar">S</div>
   </div>
+</header>
 
+<aside id="sidebar">
+  <div class="side-label">Actions</div>
+  <div id="sidebar-actions">
+    <button id="btn-launch" class="primary">Launch Run</button>
+    <button id="btn-stop" class="danger">Stop Run</button>
+    <button id="btn-refresh">Refresh</button>
+  </div>
+  <div class="side-label">Active Runs</div>
+  <div id="run-list"></div>
+  <div id="side-footer">
+    <div id="status">Connecting…</div>
+    <div id="status-sub"></div>
+  </div>
+</aside>
+
+<div id="main">
   <!-- Live Tab -->
   <div id="tab-live" class="tab-content active">
     <div id="live-placeholder" class="placeholder">Select a running pod or launch a new experiment.</div>
@@ -72,6 +87,11 @@
     <div id="compare-selection" style="display:none"></div>
     <div id="compare-charts"></div>
     <div id="compare-summary"></div>
+  </div>
+
+  <!-- Machines Tab -->
+  <div id="tab-machines" class="tab-content">
+    <div id="machines-table-area"><div class="placeholder">No pods.</div></div>
   </div>
 </div>
 

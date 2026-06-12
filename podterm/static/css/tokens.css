@@ -1,32 +1,86 @@
-/* Design tokens — single source of truth for palette, type, spacing.
-   Slice 0: values match the pre-split UI exactly; final palette lands in slice 1. */
+/* Design tokens — single source of truth for palette, type, spacing, and
+   the fixed region heights that prevent layout shift while metrics stream. */
 :root {
   /* Surfaces */
-  --bg-app: #1a1a2e;
-  --bg-panel: #16213e;
-  --bg-inset: #0d1117;
-  --border: #2a2a4a;
-  --border-row: #1e1e3a;
+  --bg-app: #0a0f1f;
+  --bg-panel: #111a33;
+  --bg-panel-raised: #182242;
+  --bg-inset: #070b16;
+  --border: #1f2a4d;
+  --border-strong: #2d3c6b;
+  --border-row: #18203d;
+
+  /* Text */
+  --text-primary: #e8edf8;
+  --text-secondary: #8e9ab8;
+  --text-muted: #5c688c;
+  --text-faint: #4a5575;
+  --text-ghost: #3e4866;
 
   /* Accent */
   --accent: #4a9eff;
-  --accent-bg: #0f3460;
-  --accent-bg-hover: #1a5276;
+  --accent-strong: #2f7df6;
+  --accent-dim: rgba(74, 158, 255, 0.12);
+  --accent-bg: #16386b;
+  --accent-bg-hover: #1d4a8c;
 
   /* Semantic */
-  --success: #4ade80;
-  --danger: #ff4a6e;
-  --danger-bg: #4a1520;
-  --danger-bg-hover: #6a1a2a;
+  --success: #34d399;
+  --success-dim: rgba(52, 211, 153, 0.10);
+  --danger: #f87171;
+  --danger-dim: rgba(248, 113, 113, 0.10);
+  --danger-bg: #3b1520;
+  --danger-bg-hover: #541d2c;
+  --warn: #fbbf24;
+  --warn-dim: rgba(251, 191, 36, 0.10);
+  --metric-cyan: #22d3ee;
 
-  /* Text */
-  --text-primary: #e0e0e0;
-  --text-secondary: #aaa;
-  --text-muted: #888;
-  --text-faint: #666;
-  --text-ghost: #555;
+  /* Chart series */
+  --series-current: #4a9eff;
+  --series-baseline: rgba(232, 237, 248, 0.40);
+  --series-evals: #a78bfa;
+  --series-steptime: #fbbf24;
+
+  /* Spacing — 8px grid */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* Radii */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
 
   /* Type */
   --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-kpi: 26px;
+  --fs-hero: 30px;
+
+  /* Fixed region heights — the no-layout-shift contract */
+  --h-nav: 52px;
+  --w-sidebar: 240px;
+  --h-kpi: 116px;
+  --h-banner: 64px;
+  --h-baseline: 48px;
+  --h-chart: 340px;
+  --h-diag: 152px;
+  --h-bottom: 320px;
+}
+
+@media (max-width: 1600px) {
+  :root {
+    --fs-kpi: 21px;
+    --fs-hero: 25px;
+    --h-chart: 300px;
+  }
 }
