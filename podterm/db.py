@@ -7,7 +7,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-from podterm.parser import MemoryInfo, RunSummary, StepMetric
+from podterm.models import MemoryInfo, RunSummary, StepMetric
 
 # ---------------------------------------------------------------------------
 # Schema
