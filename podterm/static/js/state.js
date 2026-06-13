@@ -36,6 +36,7 @@ function freshState() {
     memory: null,      // {peak_mib, reserved_mib}
     telemetry: null,   // {cpu_pct, mem_pct, gpu_util_pct, gpu_mem_pct, uptime_s}
     telemetryHistory: [], // recent gpu_util_pct samples
+    boot: null,        // {stage, image, message, layers, total, complete, pct, done}
     summary: null,     // {final_val_bpb, best_val_bpb, final_val_loss}
     phase: null,
     finished: false,
@@ -169,6 +170,11 @@ export function ensurePodStream(podId) {
       if (state.telemetryHistory.length > 120) state.telemetryHistory.splice(0, 20);
     }
     emit('pod:telemetry', { podId, telemetry: t });
+  });
+
+  es.addEventListener('pull', (e) => {
+    state.boot = JSON.parse(e.data);
+    emit('pod:boot', { podId });
   });
 
   es.addEventListener('info', (e) => {

@@ -4,6 +4,44 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
+
+
+_FALSY = {"0", "false", "no", "off", ""}
+
+
+def boot_progress_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether the boot/image-pull progress path runs (hapi polling + pull events).
+
+    On by default. Set PODTERM_BOOT_PROGRESS to 0/false/no/off to fully disable
+    it — a demo kill-switch for when the console cookie has gone stale and the
+    boot panel would otherwise sit empty.
+    """
+    env = environ or os.environ
+    return env.get("PODTERM_BOOT_PROGRESS", "1").strip().lower() not in _FALSY
+
+
+def load_dotenv(path: str | os.PathLike | None = None) -> None:
+    """Load KEY=VALUE lines from a local .env into os.environ (no overwrite).
+
+    Deliberately tiny — no python-dotenv dependency. Used for local secrets
+    like RUNPOD_CONSOLE_CLIENT_COOKIE that must never be committed (.env is
+    gitignored). Existing env vars win, so the shell can still override.
+    """
+    env_path = Path(path) if path else Path.cwd() / ".env"
+    try:
+        text = env_path.read_text()
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
 
 # ---------------------------------------------------------------------------
 # Defaults

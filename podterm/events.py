@@ -15,9 +15,10 @@ import time
 import urllib.error
 import urllib.request
 
-from podterm.config import EVENTD_PORT
+from podterm.boot import PullTracker
+from podterm.config import EVENTD_PORT, boot_progress_enabled
 from podterm.helpers import get_ssh_key_path
-from podterm.runpod import api_get_pod, api_get_ssh_info
+from podterm.runpod import api_get_machine_logs, api_get_pod, api_get_ssh_info
 
 # Queue items are (pod_id, kind, payload) tuples; kind is "log" or "event"
 LogQueue = queue.Queue[tuple[str, str, dict]]
@@ -46,6 +47,9 @@ class PodPoller(threading.Thread):
         self._stop_event = threading.Event()
         self._local_log = None
         self._log_lock = threading.Lock()  # emit_log is called from both pull loops
+        self._pull = PullTracker()  # boot/image-pull progress from machine logs
+        # Resolved once at construction so a single env read gates the whole path.
+        self._boot_enabled = boot_progress_enabled()
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -74,6 +78,28 @@ class PodPoller(threading.Thread):
         except Exception:
             return 0, None, b""
 
+    # -- Boot progress --------------------------------------------------------
+
+    def _boot_tick(self) -> None:
+        """Pull machine logs once; emit host lines + a pull snapshot on change."""
+        if not self._boot_enabled or self.skip_pod_checks:
+            return
+        lines = api_get_machine_logs(self.pod_id)
+        if not lines:
+            return
+        new_messages, changed = self._pull.ingest(lines)
+        for msg in new_messages:
+            self.emit_log(f"[host] {msg}")
+        if changed:
+            self.log_queue.put((self.pod_id, "event", self._pull.snapshot()))
+
+    def _emit_boot_done(self, message: str) -> None:
+        """Final pull snapshot so the UI leaves boot mode no matter how boot ended."""
+        if not self._boot_enabled:
+            return
+        self.log_queue.put(
+            (self.pod_id, "event", self._pull.snapshot(done=True, message=message)))
+
     # -- Lifecycle ----------------------------------------------------------
 
     def run(self) -> None:
@@ -85,10 +111,13 @@ class PodPoller(threading.Thread):
         try:
             self.emit_log(f"Waiting for pod {self.pod_name}...")
             if not self.skip_pod_checks and not self._wait_for_running():
+                self._emit_boot_done("Pod stopped before reaching RUNNING.")
                 return
             log_size = self._wait_for_daemon()
             if log_size is None:
+                self._emit_boot_done("Gave up waiting for the event daemon.")
                 return
+            self._emit_boot_done("Container up — event daemon connected.")
             if not self.skip_pod_checks:
                 self._emit_ssh_info()
             # Raw log tails from near the end (like tail -n 200); events replay from 0
@@ -110,6 +139,7 @@ class PodPoller(threading.Thread):
         for tick in range(120):
             if self._stop_event.is_set():
                 return False
+            self._boot_tick()
             pod = api_get_pod(self.pod_id)
             if pod:
                 status = pod.get("desiredStatus", "UNKNOWN")
@@ -135,6 +165,7 @@ class PodPoller(threading.Thread):
         while time.monotonic() < deadline:
             if self._stop_event.is_set():
                 return None
+            self._boot_tick()
             status, _, body = self._request("/health", timeout=10)
             if status == 200:
                 try:

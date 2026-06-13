@@ -240,3 +240,37 @@
   border: 1px solid var(--border); border-radius: var(--r-pill); font-size: var(--fs-sm); }
 .run-chip .chip-x { cursor: pointer; color: var(--text-muted); font-size: 14px; line-height: 1; }
 .run-chip .chip-x:hover { color: var(--danger); }
+
+/* Boot panel — replaces the live dashboard until the container is up */
+#boot-panel { display: none; }
+#live-view.booting > :not(#boot-panel) { display: none; }
+#live-view.booting #boot-panel { display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-5); background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: var(--r-md); max-width: 1080px; }
+.boot-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); }
+#boot-stage { font-size: var(--fs-xl); font-weight: 700; color: var(--text-primary); }
+#boot-image { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-muted);
+              margin-top: 2px; }
+#boot-counter { font-size: var(--fs-md); color: var(--text-secondary);
+                font-variant-numeric: tabular-nums; white-space: nowrap; }
+.boot-bar { height: 10px; background: var(--bg-inset); border-radius: 5px; overflow: hidden; }
+.boot-bar-fill { height: 100%; width: 0%; border-radius: 5px;
+                 background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+                 transition: width 0.4s; }
+#boot-message { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--text-secondary);
+                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#boot-layers { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+               gap: var(--sp-2); }
+.boot-layer { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+              padding: 5px 8px; border-radius: var(--r-sm); border: 1px solid var(--border);
+              background: var(--bg-inset); font-size: var(--fs-xs); font-family: var(--font-mono); }
+.bl-id { color: var(--text-muted); }
+.bl-state { font-weight: 600; color: var(--text-secondary); }
+.boot-layer.st-pending .bl-state, .boot-layer.st-waiting .bl-state { color: var(--text-faint); }
+.boot-layer.st-downloading { border-color: rgba(74, 158, 255, 0.45); }
+.boot-layer.st-downloading .bl-state { color: var(--accent); }
+.boot-layer.st-verifying .bl-state, .boot-layer.st-downloaded .bl-state { color: var(--metric-cyan); }
+.boot-layer.st-extracting { border-color: rgba(251, 191, 36, 0.45); }
+.boot-layer.st-extracting .bl-state { color: var(--warn); }
+.boot-layer.st-complete { border-color: rgba(52, 211, 153, 0.35); background: var(--success-dim); }
+.boot-layer.st-complete .bl-state { color: var(--success); }

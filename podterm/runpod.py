@@ -1,8 +1,10 @@
-"""RunPod API layer — runpodctl CLI, plus one read-only GraphQL query for
-utilization telemetry (the REST API behind runpodctl has no telemetry fields)."""
+"""RunPod API layer — runpodctl CLI, plus two read-only direct API calls the
+CLI can't cover: a GraphQL query for utilization telemetry and the hapi
+machine-log endpoint for boot/image-pull progress."""
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -191,6 +193,131 @@ def api_get_ssh_info(pod_id: str) -> dict | None:
         return _rpc_json("ssh", "info", pod_id)
     except Exception:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Machine logs (host-level: volume create, image pull, container start)
+#
+# The hapi.runpod.net logs endpoint is the console's internal backend and only
+# accepts a short-lived (~60s) Clerk *console* session JWT — the RunPod API key
+# gets 403. We mint a fresh JWT on demand from the user's `__client` cookie
+# (RUNPOD_CONSOLE_CLIENT_COOKIE, set in .env), the same way the console does.
+# All of this is best-effort: any failure returns [] and the boot panel just
+# never appears. See memory hapi-logs-auth / chrome-cookie-read-blocked.
+# ---------------------------------------------------------------------------
+
+_CLERK_BASE = "https://clerk.runpod.io/v1"
+_CLERK_QS = "__clerk_api_version=2025-11-10&_clerk_js_version=5.125.13"
+_HAPI_LOGS = "https://hapi.runpod.net/v1/pod/{}/logs"
+_BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+
+# Cached across calls: the derived session id, and the last minted JWT + its
+# expiry (epoch seconds). Tokens live ~60s; re-mint a few seconds early.
+_console_sid: str | None = None
+_console_jwt: tuple[str, float] | None = None  # (jwt, exp_epoch)
+
+
+def _console_cookie() -> str | None:
+    return os.environ.get("RUNPOD_CONSOLE_CLIENT_COOKIE") or None
+
+
+def _clerk_request(path: str, cookie: str) -> dict:
+    req = urllib.request.Request(
+        f"{_CLERK_BASE}/{path}?{_CLERK_QS}",
+        data=b"",  # POST; GET endpoints tolerate an empty body here
+        headers={
+            "Origin": "https://console.runpod.io",
+            "Referer": "https://console.runpod.io/",
+            "User-Agent": _BROWSER_UA,
+            "Cookie": f"__client={cookie}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _console_session_id(cookie: str) -> str | None:
+    global _console_sid
+    if _console_sid:
+        return _console_sid
+    try:
+        # GET /client lists the active session(s); empty-body POST is rejected,
+        # so issue it as a real GET via a tweaked request.
+        req = urllib.request.Request(
+            f"{_CLERK_BASE}/client?{_CLERK_QS}",
+            headers={"Origin": "https://console.runpod.io", "User-Agent": _BROWSER_UA,
+                     "Cookie": f"__client={cookie}"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+        r = data.get("response") or data
+        _console_sid = r.get("last_active_session_id") or (
+            (r.get("sessions") or [{}])[0].get("id"))
+    except Exception:
+        _console_sid = None
+    return _console_sid
+
+
+def _console_jwt_fresh() -> str | None:
+    """Return a valid console JWT, minting (and caching) one if needed."""
+    global _console_jwt
+    import time as _time
+    if _console_jwt and _console_jwt[1] - _time.time() > 8:
+        return _console_jwt[0]
+    cookie = _console_cookie()
+    if not cookie:
+        return None
+    sid = _console_session_id(cookie)
+    if not sid:
+        return None
+    try:
+        data = _clerk_request(f"client/sessions/{sid}/tokens", cookie)
+        jwt = data.get("jwt")
+    except Exception:
+        return None
+    if not jwt:
+        return None
+    # Trust the JWT's own exp claim rather than guessing a fixed TTL.
+    exp = _time.time() + 55
+    try:
+        payload = jwt.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(payload)).get("exp", exp)
+    except Exception:
+        pass
+    _console_jwt = (jwt, float(exp))
+    return jwt
+
+
+def api_get_machine_logs(pod_id: str) -> list[str]:
+    """Host+container boot log lines for a pod (image pull, container start).
+
+    Covers the window before the in-container event daemon is reachable, which
+    neither runpodctl nor the daemon can see. Best-effort: returns [] on any
+    failure (no console cookie configured, token mint failed, pod gone, …).
+    """
+    jwt = _console_jwt_fresh()
+    if not jwt:
+        return []
+    req = urllib.request.Request(
+        _HAPI_LOGS.format(pod_id),
+        headers={"Authorization": f"Bearer {jwt}", "Origin": "https://console.runpod.io",
+                 "User-Agent": _BROWSER_UA},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+    except Exception:
+        return []
+    # hapi returns {"container": [...]} (and/or other buckets); flatten to lines.
+    if isinstance(data, dict):
+        lines: list[str] = []
+        for v in data.values():
+            if isinstance(v, list):
+                lines.extend(str(x) for x in v)
+        return lines
+    return data if isinstance(data, list) else []
 
 
 # ---------------------------------------------------------------------------

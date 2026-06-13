@@ -148,6 +148,9 @@ async def drain_loop() -> None:
                     metrics_buffer.pop(pod_id, None)
                 elif "Training finished" in phase:
                     _finalize_run(pod_id)
+            elif t == "pull":
+                # Boot/image-pull progress — transient, SSE only (no DB row)
+                _sse_send(pod_id, "pull", payload)
             elif t == "pod_gone":
                 _finalize_run(pod_id)
             elif t == "raw":
