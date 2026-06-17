@@ -76,6 +76,18 @@ def _request(url: str, token: str, timeout: float) -> tuple[int, bytes]:
         return 0, b""
 
 
+# -- Subprocess env ----------------------------------------------------------
+
+
+def _gpt_golf_env(**extra: str) -> dict[str, str]:
+    """Base env for subprocesses launched with cwd=gpt_golf_dir(). Drops PodTerm's own virtualenv
+    vars so `uv run` cleanly resolves gpt-golf's project env instead of warning about (and ignoring)
+    a mismatched VIRTUAL_ENV inherited from the PodTerm process."""
+    env = {k: v for k, v in os.environ.items() if k not in {"VIRTUAL_ENV", "PYTHONHOME"}}
+    env.update(extra)
+    return env
+
+
 # -- Device probe ------------------------------------------------------------
 
 
@@ -89,7 +101,8 @@ def _resolve_device() -> str:
         try:
             r = subprocess.run(
                 [*diag_python_cmd(), "-c", "import torch; print(torch.cuda.is_available())"],
-                cwd=str(gpt_golf_dir()), capture_output=True, text=True, timeout=180,
+                cwd=str(gpt_golf_dir()), env=_gpt_golf_env(),
+                capture_output=True, text=True, timeout=180,
             )
             _device_cache = "cuda:0" if r.stdout.strip().endswith("True") else "cpu"
         except Exception:
@@ -119,7 +132,7 @@ async def handle_snapshot(pod_id: str, payload: dict) -> None:
 
 
 def _process(pod_id: str, payload: dict) -> None:
-    """Blocking: download → run diagnostics → persist → SSE → ack. Runs in a worker thread."""
+    """Blocking: download → (ack final) → run diagnostics → persist → SSE. Runs in a worker thread."""
     step = int(payload.get("step", 0))
     run = db.get_run(pod_id) or {}
     cfg = {}
@@ -132,6 +145,12 @@ def _process(pod_id: str, payload: dict) -> None:
     variant = run.get("data_variant") or cfg.get("data_variant") or DEFAULT_DATA_VARIANT
 
     ckpt = _download(pod_id, token, payload)
+    if payload.get("final"):
+        # Release the pod the instant its last checkpoint is safely off-pod (downloaded + sha-verified
+        # in _download). bootstrap.sh's teardown is polling for this ack and breaks out as soon as it
+        # lands; diagnostics run off-pod, so the pod needn't be held alive for them.
+        _ack_final(pod_id, token, step)
+
     diag, status = _run_diagnostics(ckpt, step, variant)
 
     db.add_diagnostics(pod_id, step, status, json.dumps(diag))
@@ -141,9 +160,17 @@ def _process(pod_id: str, payload: dict) -> None:
     })
     log.info("diagnostics done pod=%s step=%s status=%s", pod_id, step, status)
 
-    if payload.get("final"):
-        # Release the pod: bootstrap.sh is holding teardown until this ack lands.
-        _request(f"{_base_url(pod_id)}/snapshot/ack?step={step}", token, timeout=15)
+
+def _ack_final(pod_id: str, token: str, step: int) -> None:
+    """Tell the pod its final snapshot is downloaded — 'download complete, you can stop now'.
+
+    Writes the teardown-handshake sentinel via the daemon's /snapshot/ack endpoint, which lets
+    bootstrap.sh's cleanup() stop waiting (up to 120s) and tear the pod down immediately."""
+    status, _ = _request(f"{_base_url(pod_id)}/snapshot/ack?step={step}", token, timeout=15)
+    if status == 200:
+        log.info("final snapshot acked pod=%s step=%s — pod released", pod_id, step)
+    else:
+        log.warning("final snapshot ack failed pod=%s step=%s status=%s", pod_id, step, status)
 
 
 def _download(pod_id: str, token: str, payload: dict) -> Path:
@@ -178,7 +205,7 @@ def _ensure_val_shard(variant: str) -> bool:
             proc = subprocess.run(
                 [*diag_python_cmd(), "data/cached_challenge_fineweb.py",
                  "--variant", variant, "--train-shards", "0"],
-                cwd=str(gpt_golf_dir()), env={**os.environ},
+                cwd=str(gpt_golf_dir()), env=_gpt_golf_env(),
                 capture_output=True, text=True, timeout=_VAL_SHARD_TIMEOUT,
             )
         except Exception:
@@ -197,20 +224,23 @@ def _run_diagnostics(ckpt: Path, step: int, variant: str) -> tuple[dict, str]:
     out = ckpt.with_suffix(".diag.json")
     device = _resolve_device()
     no_tokens = device == "cpu" or os.environ.get("DIAG_NO_TOKENS", "").strip().lower() in {"1", "true", "yes"}
-    if not no_tokens and diag_cache_val_shard() and not _ensure_val_shard(variant):
-        # Couldn't get the val shard local — degrade to weights-only instead of failing the run.
+    # Importing train_gpt (even for a weights-only run) loads the tokenizer at import time, and the
+    # token stages additionally need the val shard. gpt-golf's downloader brings both together, so
+    # ensure it for *every* run — not just GPU/token ones — or the subprocess can't even import.
+    if diag_cache_val_shard() and not _ensure_val_shard(variant) and not no_tokens:
+        # No val shard — degrade the token stages to weights-only. (If the tokenizer is missing too,
+        # train_gpt won't import and the subprocess error is recorded below.)
         log.warning("falling back to weights-only diagnostics (no val shard) variant=%s step=%s", variant, step)
         no_tokens = True
     cmd = [*diag_python_cmd(), "-m", "podterm.diagnostics", str(ckpt), "--out", str(out), "--step", str(step)]
     if no_tokens:
         cmd.append("--no-tokens")
-    env = {
-        **os.environ,
-        "PYTHONPATH": os.pathsep.join(filter(None, [str(_PODTERM_ROOT), os.environ.get("PYTHONPATH", "")])),
-        "DEVICE": device,
-        "DATA_VARIANT": variant,
+    env = _gpt_golf_env(
+        PYTHONPATH=os.pathsep.join(filter(None, [str(_PODTERM_ROOT), os.environ.get("PYTHONPATH", "")])),
+        DEVICE=device,
+        DATA_VARIANT=variant,
         **diag_caps(),
-    }
+    )
     proc = subprocess.run(
         cmd, cwd=str(gpt_golf_dir()), env=env,
         capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
