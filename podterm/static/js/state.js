@@ -187,6 +187,11 @@ export function ensurePodStream(podId) {
     emit('pod:summary', { podId, summary: state.summary });
   });
 
+  es.addEventListener('diagnostic', (e) => {
+    // Off-pod model-health result for one snapshot; the panel refetches the full series.
+    emit('pod:diagnostic', { podId, diag: JSON.parse(e.data) });
+  });
+
   es.addEventListener('phase', (e) => {
     const d = JSON.parse(e.data);
     state.phase = d.phase || null;

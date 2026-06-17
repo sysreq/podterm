@@ -13,7 +13,7 @@ import queue
 import time
 from dataclasses import asdict
 
-from podterm import db
+from podterm import db, snapshots
 from podterm.events import LogQueue
 from podterm.models import MemoryInfo, RunSummary, StepMetric
 from podterm.runpod import api_get_telemetry
@@ -112,6 +112,10 @@ class EventPipeline:
                         metrics_buffer.pop(pod_id, None)
                     elif "Training finished" in phase:
                         self.finalize_run(pod_id)
+                elif t == "snapshot":
+                    # Model snapshot ready on the pod — pull it and run diagnostics off-pod.
+                    self.sse.send(pod_id, "snapshot", {"step": payload.get("step"), "final": payload.get("final")})
+                    asyncio.create_task(snapshots.handle_snapshot(pod_id, payload))
                 elif t == "pull":
                     # Boot/image-pull progress — transient, SSE only (no DB row)
                     self.sse.send(pod_id, "pull", payload)

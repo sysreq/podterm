@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS metrics (
     PRIMARY KEY (run_id, step)
 );
 
+CREATE TABLE IF NOT EXISTS run_diagnostics (
+    run_id     TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+    step       INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    status     TEXT,
+    diag_json  TEXT,
+    PRIMARY KEY (run_id, step)
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_branch  ON runs(branch);
 CREATE INDEX IF NOT EXISTS idx_runs_gpu     ON runs(gpu_type);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
@@ -244,6 +253,40 @@ def get_metrics_multi(run_ids: list[str]) -> dict[str, list[dict]]:
     for rid in run_ids:
         result[rid] = get_metrics(rid)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics (off-pod model-health snapshots)
+# ---------------------------------------------------------------------------
+
+
+def add_diagnostics(run_id: str, step: int, status: str, diag_json: str) -> None:
+    """Store one snapshot's diagnostics result (full JSON) keyed by (run, step)."""
+    conn = _get_conn()
+    conn.execute(
+        """INSERT OR REPLACE INTO run_diagnostics (run_id, step, created_at, status, diag_json)
+           VALUES (?, ?, ?, ?, ?)""",
+        (run_id, step, datetime.now(timezone.utc).isoformat(), status, diag_json),
+    )
+    conn.commit()
+
+
+def get_diagnostics(run_id: str) -> list[dict]:
+    """All diagnostics snapshots for a run, oldest step first (a model-health time series)."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT step, created_at, status, diag_json FROM run_diagnostics WHERE run_id = ? ORDER BY step",
+        (run_id,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["diag"] = json.loads(d.pop("diag_json")) if d.get("diag_json") else None
+        except (ValueError, TypeError):
+            d["diag"] = None
+        out.append(d)
+    return out
 
 
 def get_distinct_branches() -> list[str]:

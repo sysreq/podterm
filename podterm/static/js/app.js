@@ -7,6 +7,7 @@ import { compareSelected, initCompare } from './compare.js';
 import { openLaunchDialog, openImportDialog, initLaunch } from './launch.js';
 import { initLogs } from './logs.js';
 import { initConfigPanel } from './configpanel.js';
+import { initDiagnostics } from './diagnostics.js';
 
 // Browsers cap ~6 SSE connections per origin on HTTP/1.1 — stream at most
 // this many pods at once (the active pod always gets one).
@@ -132,6 +133,7 @@ function init() {
   initLive();
   initLogs();
   initConfigPanel();
+  initDiagnostics();
   initHistory();
   initCompare();
   initLaunch();

@@ -19,6 +19,12 @@ async def get_run_metrics(run_id: str):
     return db.get_metrics(run_id)
 
 
+@router.get("/api/runs/{run_id}/diagnostics")
+async def get_run_diagnostics(run_id: str):
+    """Model-health diagnostics time series (one entry per snapshot step)."""
+    return db.get_diagnostics(run_id)
+
+
 @router.post("/api/compare")
 async def compare_runs(body: dict):
     run_ids = body.get("run_ids", [])

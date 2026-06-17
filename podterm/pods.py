@@ -16,6 +16,7 @@ from podterm.config import (
     DEFAULT_DATA_VARIANT,
     DEFAULT_DATA_VERSION,
     DEFAULT_IMAGE,
+    DEFAULT_SNAPSHOT_EVERY,
     POD_PREFIX,
     build_optional_debug_env,
 )
@@ -42,6 +43,7 @@ class LaunchConfig(BaseModel):
     compile_debug: bool = False
     graph_logs: bool = False
     time_budget: int = 600
+    snapshot_every: int = DEFAULT_SNAPSHOT_EVERY  # steps between model-health snapshots; 0 disables
     prep_shards: int = 20
     data_repo_id: str = DEFAULT_DATA_REPO_ID
     data_version: str = DEFAULT_DATA_VERSION
@@ -128,6 +130,7 @@ class PodManager:
             "MAX_WALLCLOCK_SECONDS": str(cfg.time_budget),
             "TRAIN_LOG_EVERY": "250",
             "VAL_LOSS_EVERY": "1000",
+            "SNAPSHOT_EVERY": str(cfg.snapshot_every),  # config_gpt.TrainingConfig.snapshot_every
             "RUNPOD_ADMIN_API_KEY": "{{ RUNPOD_SECRET_SERVICE_API_KEY }}",
             "GITHUB_TOKEN": "{{ RUNPOD_SECRET_gh_gpt-golf_token }}",
             "HF_TOKEN": "{{ RUNPOD_SECRET_hf_gpt-golf_token }}",

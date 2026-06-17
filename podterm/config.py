@@ -74,6 +74,53 @@ TEMPLATE_NAME = "gpt-golf-train"
 EVENTD_PORT = 8765
 
 # ---------------------------------------------------------------------------
+# Off-pod diagnostics (model-health snapshots)
+# ---------------------------------------------------------------------------
+
+# Default per-run snapshot cadence injected into the pod env (config_gpt.TRAIN.snapshot_every).
+DEFAULT_SNAPSHOT_EVERY = 1000
+
+
+def diagnostics_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether PodTerm downloads snapshots and runs diagnostics. On unless DIAG_ENABLED is falsy."""
+    env = environ or os.environ
+    return env.get("DIAG_ENABLED", "1").strip().lower() not in _FALSY
+
+
+def gpt_golf_dir(environ: Mapping[str, str] | None = None) -> Path:
+    """The sibling gpt-golf checkout — diagnostics import its model (train_gpt/config_gpt)."""
+    env = environ or os.environ
+    return Path(env.get("GPT_GOLF_DIR", Path.cwd().parent / "gpt-golf")).expanduser()
+
+
+def diag_python_cmd(environ: Mapping[str, str] | None = None) -> list[str]:
+    """Launcher prefix for the diagnostics subprocess, run with cwd=gpt_golf_dir so it picks up
+    gpt-golf's torch env. Override via DIAG_PYTHON (e.g. an explicit interpreter path)."""
+    import shlex
+    env = environ or os.environ
+    return shlex.split(env.get("DIAG_PYTHON", "uv run --no-sync python"))
+
+
+def diag_device(environ: Mapping[str, str] | None = None) -> str:
+    """DEVICE for the diagnostics run: 'auto' (probe), 'cpu', or an explicit cuda device."""
+    env = environ or os.environ
+    return env.get("DIAG_DEVICE", "auto").strip() or "auto"
+
+
+def diag_caps(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """DIAG_* knobs that bound the forward sweep cost (read by the diagnostics config loader).
+
+    Defaults are deliberately small (a couple of batches, sampling off) so a per-interval run is
+    cheap; override any of them in the env for a fuller sweep.
+    """
+    env = environ or os.environ
+    return {
+        "DIAG_MAX_BATCHES": env.get("DIAG_MAX_BATCHES", "2"),
+        "DIAG_ENTROPY_BATCHES": env.get("DIAG_ENTROPY_BATCHES", "1"),
+        "DIAG_SAMPLE_TOKENS": env.get("DIAG_SAMPLE_TOKENS", "0"),
+    }
+
+# ---------------------------------------------------------------------------
 # Debug environment helpers
 # ---------------------------------------------------------------------------
 
