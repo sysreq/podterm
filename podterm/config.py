@@ -107,6 +107,14 @@ def diag_device(environ: Mapping[str, str] | None = None) -> str:
     return env.get("DIAG_DEVICE", "auto").strip() or "auto"
 
 
+def diag_cache_val_shard(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether token-requiring diagnostics first ensure the val shard is cached locally (in gpt-golf's
+    data dir) by invoking gpt-golf's downloader. On unless DIAG_CACHE_VAL_SHARD is falsy — turn it off
+    if the val shard is provisioned out-of-band and you don't want PodTerm reaching out to HuggingFace."""
+    env = environ or os.environ
+    return env.get("DIAG_CACHE_VAL_SHARD", "1").strip().lower() not in _FALSY
+
+
 def diag_caps(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     """DIAG_* knobs that bound the forward sweep cost (read by the diagnostics config loader).
 
