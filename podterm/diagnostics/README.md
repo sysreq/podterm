@@ -23,7 +23,7 @@ Env knobs (`config.py`): `DIAG_JSON_PATH`, `DIAG_MAX_BATCHES` (forward-sweep cap
 ## How it stays decoupled from the model
 
 - `anatomy.probe(model)` discovers spine attrs (`wte/first_norm/final_norm/lm_head/blocks`) and per-block **capabilities** (`_qkv`/`_attend`/`_mlp` callables, head attrs, `block_mask.mask_mod`, linear activation, `_init_std` markers, `_gate_dim` annotation on gated activations). Metrics whose requirements are missing are **skipped with a reason**, never crash.
-- Forward metrics come from hooks on a **real** forward pass; per-block intermediates are regenerated from the captured block input via the block's *own* `_qkv`/`_mlp` plus a compiled flex_attention + gain + projection recompute of the attn branch (the only duplicated model lines). Two cross-checks guard everything recomputed:
+- Forward metrics come from hooks on a **real** forward pass; per-block intermediates are regenerated from the captured block input via the block's *own* `_qkv`/`_mlp` plus an SDPA (`sdpa_flex`) + gain + projection recompute of the attn branch (the only duplicated model lines). The model itself runs uncompiled here, so `train_gpt.flex_attention` is monkeypatched to the same SDPA shim (`attention.py`) — eager flex is minutes/forward and compiling it per snapshot never amortizes; SDPA does the identical masked attention with a native fused kernel. Two cross-checks guard everything recomputed:
   - **recompose**: `h_in + attn + mlp ≈ captured block output` (validates the branch recompute, gain placement, and block composition in one shot)
   - **loss_recompute**: softcap+CE from captured logits ≈ the model's own loss
   Failures mark rows `!` in console / `"_unverified"` in JSON and land in `meta.checks` — loud, not fatal.

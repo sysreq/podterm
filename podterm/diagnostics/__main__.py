@@ -10,6 +10,11 @@ a = p.parse_args()
 
 import torch, train_gpt  # noqa: E402 -- import runs config_gpt.settings(): device (DEVICE env), tokenizer, seeds
 
+# The model is uncompiled here, so its eager flex_attention is the slow reference path (minutes/forward).
+# Swap in the SDPA equivalent -- same masked attention, native fused kernel, no compile -- before any forward.
+from podterm.diagnostics.attention import sdpa_flex  # noqa: E402
+train_gpt.flex_attention = sdpa_flex
+
 model = train_gpt.GPT().to(train_gpt.HW.device).bfloat16()
 model.load_state_dict(torch.load(a.checkpoint, map_location=train_gpt.HW.device), strict=True)
 from podterm.diagnostics.runner import run_diagnostics  # noqa: E402

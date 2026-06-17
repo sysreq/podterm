@@ -2,16 +2,15 @@ import math, warnings
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention.flex_attention import flex_attention as _flex_attention
 
 import config_gpt as C
 from . import report as R
+from .attention import sdpa_flex
 from .capture import CaptureSession, rel_err, val_batches
 from .runner import Stage
 from .schema import SKIPPED
 
 REL_TOL = 1e-2; LOSS_TOL = 1e-3; ENTROPY_CHUNK = 8
-flex_attention = torch.compile(_flex_attention)  # eager flex falls back to the math decomposition -- too slow for the full-val sweep
 
 
 class ForwardStage(Stage):
@@ -43,8 +42,7 @@ class ForwardStage(Stage):
                     if can_branch[i]:
                         xb, q, k, v = m._qkv(h_in); mlp = m._mlp(xb)
                         if can_y[i]:
-                            yv = flex_attention(q, k, v, block_mask=m.block_mask, enable_gqa=(b.kv_heads != b.heads),
-                                                kernel_options=getattr(m, 'attn_opts', None))
+                            yv = sdpa_flex(q, k, v, block_mask=m.block_mask, enable_gqa=(b.kv_heads != b.heads))
                             yv = yv * m.attn_gain.to(yv.dtype)[None, :, None, :]
                             attn = F.linear(yv.transpose(1, 2).reshape(sc, sl, b.heads * b.head_dim), m.atn_proj.weight)
                             a['y'] += yv.float().norm(dim=-1).sum((0, 2))
