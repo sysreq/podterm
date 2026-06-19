@@ -1,7 +1,7 @@
 // Config / Repro panel. Every value comes from run metadata (info events,
 // the /api/runs row, or the live pod object) — fields the launch pipeline
 // doesn't record yet render as explicit pending text.
-import { app, getPodState, on } from './state.js';
+import { app, getPodState, hydrateRunRow, on } from './state.js';
 
 function parseConfig(state) {
   try {
@@ -9,6 +9,23 @@ function parseConfig(state) {
   } catch {
     return null;
   }
+}
+
+function valueAt(obj, path) {
+  return path.split('.').reduce((cur, key) => (cur && typeof cur === 'object' ? cur[key] : undefined), obj);
+}
+
+function firstPresent(...values) {
+  return values.find((v) => v !== undefined && v !== null && v !== '');
+}
+
+function configValue(cfg, ...paths) {
+  return firstPresent(...paths.map((path) => valueAt(cfg, path)));
+}
+
+function formatTokens(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? `${num.toLocaleString('en-US')} tok/step` : String(value);
 }
 
 // eventd bearer token is persisted in config_json — never show it.
@@ -56,6 +73,7 @@ export function renderConfigPanel(podId) {
   const rowsEl = document.getElementById('config-rows');
   if (!rowsEl) return;
   const state = getPodState(podId);
+  if (!state.runRow && !state.runRowHydrated) hydrateRunRow(podId);
   const pod = app.pods.find((p) => p.id === podId) || {};
   const run = state.runRow || {};
   const cfg = parseConfig(state) || {};
@@ -91,9 +109,21 @@ export function renderConfigPanel(podId) {
     : row('Docker image', 'Not recorded for stopped pods', { pending: true }));
 
   // Run config emitted by the pod at training start (config event), persisted on the run row.
-  const seed = state.info.seed ?? run.seed ?? cfg.seed ?? null;
-  const seqLen = state.info.seq_len ?? run.seq_len ?? cfg.seq_len ?? null;
-  const batchTokens = state.info.batch_tokens ?? run.batch_tokens ?? null;
+  const seed = firstPresent(
+    state.info.seed,
+    run.seed,
+    configValue(cfg, 'seed', 'train.seed', 'training.seed', 'io.seed'),
+  );
+  const seqLen = firstPresent(
+    state.info.seq_len,
+    run.seq_len,
+    configValue(cfg, 'seq_len', 'sequence_length', 'train.seq_len', 'train.sequence_length', 'training.seq_len', 'training.sequence_length'),
+  );
+  const batchTokens = firstPresent(
+    state.info.batch_tokens,
+    run.batch_tokens,
+    configValue(cfg, 'batch_tokens', 'batch_size', 'batch', 'train.batch_tokens', 'train.batch_size', 'train.batch', 'training.batch_tokens', 'training.batch_size', 'training.batch'),
+  );
   rowsEl.appendChild(seed != null
     ? row('Seed', String(seed))
     : row('Seed', 'Awaiting boot info', { pending: true }));
@@ -101,8 +131,8 @@ export function renderConfigPanel(podId) {
     ? row('Sequence length', String(seqLen))
     : row('Sequence length', 'Awaiting boot info', { pending: true }));
   rowsEl.appendChild(batchTokens != null
-    ? row('Batch size', `${Number(batchTokens).toLocaleString('en-US')} tok/step`)
-    : row('Batch size', 'Awaiting boot info', { pending: true }));
+    ? row('Batch', formatTokens(batchTokens))
+    : row('Batch', 'Awaiting boot info', { pending: true }));
 
   // Real metadata the pipeline does record — keeps the panel useful today.
   if (run.data_variant || cfg.data_variant) rowsEl.appendChild(row('Data variant', run.data_variant || cfg.data_variant));
@@ -123,6 +153,9 @@ export function initConfigPanel() {
   document.getElementById('btn-full-config').addEventListener('click', openConfigDialog);
   document.getElementById('btn-config-close').addEventListener('click', () => document.getElementById('config-dialog').close());
   on('pod:info', ({ podId }) => {
+    if (app.activePod === podId) renderConfigPanel(podId);
+  });
+  on('pod:run-row', ({ podId }) => {
     if (app.activePod === podId) renderConfigPanel(podId);
   });
 }

@@ -45,6 +45,8 @@ function freshState() {
     exitCode: null,
     lastMetric: null,
     runRow: null, // /api/runs row for this pod (started_at, cost_per_hr, …)
+    runRowHydrated: false,
+    runRowHydrating: false,
     // Baseline comparison
     baselineRunId: null,
     baselineByStep: {},
@@ -131,6 +133,7 @@ export function resetRunState(podId) {
   s.summary = null;
   s.finished = false;
   s.exitCode = null;
+  s.runRowHydrated = false;
   emit('pod:reset', { podId });
 }
 
@@ -241,4 +244,21 @@ export async function hydrateFromDb(podId, force = false) {
   state.evals.sort((a, b) => a.step - b.step);
   state.lastMetric = state.metricHistory[state.metricHistory.length - 1];
   emit('pod:hydrated', { podId });
+}
+
+export async function hydrateRunRow(podId, force = false) {
+  const state = getPodState(podId);
+  if ((state.runRowHydrated && !force) || state.runRowHydrating) return state.runRow;
+  state.runRowHydrating = true;
+
+  try {
+    state.runRow = await fetchJson(`/api/runs/${encodeURIComponent(podId)}`);
+    state.runRowHydrated = true;
+    emit('pod:run-row', { podId, runRow: state.runRow });
+  } catch {
+    state.runRowHydrated = true;
+  } finally {
+    state.runRowHydrating = false;
+  }
+  return state.runRow;
 }

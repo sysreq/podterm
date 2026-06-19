@@ -1,5 +1,5 @@
 // Live view orchestration: stream setup, charts, logs/config panels, and event wiring.
-import { app, getPodState, ensurePodStream, hydrateFromDb, on } from './state.js';
+import { app, getPodState, ensurePodStream, hydrateFromDb, hydrateRunRow, on } from './state.js';
 import { initLiveCharts, updateLiveCharts, updateBaselineTrace } from './charts.js';
 import { renderLogs } from './logs.js';
 import { renderConfigPanel } from './configpanel.js';
@@ -9,6 +9,7 @@ import { buildKpiRow, hasKpiCards, updateKpis } from './live/kpis.js';
 
 export function renderLiveView(podId) {
   ensurePodStream(podId);
+  hydrateRunRow(podId);
   hydrateFromDb(podId);
   const state = getPodState(podId);
 

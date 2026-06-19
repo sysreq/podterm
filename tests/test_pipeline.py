@@ -62,3 +62,29 @@ def test_phase_event_resets_buffer_and_finalizes(monkeypatch):
 
     assert finished == [("pod-1", 0)]
     assert "pod-1" not in pipe.run_exit_code
+
+
+def test_config_event_normalizes_repro_aliases(monkeypatch):
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+    updates = []
+    monkeypatch.setattr(
+        pipeline_mod.db,
+        "update_run",
+        lambda pod_id, **fields: updates.append((pod_id, fields)),
+    )
+
+    pipe._handle_event("pod-1", {
+        "t": "config",
+        "seed": 123,
+        "sequence_length": 1024,
+        "batch_size": 8192,
+    }, {})
+
+    assert sse.events == [("pod-1", "info", {
+        "seed": 123,
+        "seq_len": 1024,
+        "batch_tokens": 8192,
+        "grad_accum": None,
+    })]
+    assert updates == [("pod-1", {"seed": 123, "seq_len": 1024, "batch_tokens": 8192})]

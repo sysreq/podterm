@@ -24,6 +24,22 @@ async def list_runs(
     return db.list_runs(limit=limit, branch=branch, gpu=gpu)
 
 
+@router.get("/api/runs/filters")
+async def run_filters():
+    return {
+        "branches": db.get_distinct_branches(),
+        "gpus": db.get_distinct_gpus(),
+    }
+
+
+@router.get("/api/runs/{run_id}")
+async def get_run_row(run_id: str):
+    row = db.get_run(run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return row
+
+
 @router.get("/api/runs/{run_id}/metrics")
 async def get_run_metrics(run_id: str):
     return db.get_metrics(run_id)
@@ -60,11 +76,3 @@ def _compare_diagnostics(run_ids: list[str]) -> dict:
             if latest[rid]:
                 diff[rid] = diff_docs(latest[base_id], latest[rid])
     return {"base": base_id, "health": health, "diff": diff}
-
-
-@router.get("/api/runs/filters")
-async def run_filters():
-    return {
-        "branches": db.get_distinct_branches(),
-        "gpus": db.get_distinct_gpus(),
-    }

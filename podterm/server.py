@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from podterm import db
+from podterm.metadata_cache import metadata_cache
 from podterm.pipeline import pipeline
 from podterm.pods import manager
 from podterm.routes import routers
@@ -29,6 +30,12 @@ async def lifespan(app: FastAPI):
     # Start drain loop + telemetry poller
     drain_task = asyncio.create_task(pipeline.drain_loop())
     telemetry_task = asyncio.create_task(pipeline.telemetry_loop())
+    try:
+        await asyncio.wait_for(metadata_cache.refresh_once(), timeout=20)
+    except TimeoutError:
+        # Don't block app startup forever if RunPod/HF metadata is slow; routes still have fallbacks.
+        pass
+    metadata_task = asyncio.create_task(metadata_cache.refresh_loop(initial_delay=True))
 
     # Auto-open browser after a short delay
     async def _open_browser():
@@ -51,6 +58,7 @@ async def lifespan(app: FastAPI):
     # Cleanup
     drain_task.cancel()
     telemetry_task.cancel()
+    metadata_task.cancel()
     manager.stop_all()
     db.close()
 

@@ -7,6 +7,7 @@ import asyncio
 from fastapi import APIRouter
 
 from podterm.helpers import build_variant_choices, fetch_manifest, get_git_branches
+from podterm.metadata_cache import metadata_cache
 from podterm.pods import manager
 from podterm.runpod import get_available_gpus, get_datacenters
 
@@ -15,11 +16,17 @@ router = APIRouter()
 
 @router.get("/api/datacenters")
 async def datacenters():
+    cached = metadata_cache.datacenters()
+    if cached:
+        return cached
     return await asyncio.to_thread(get_datacenters)
 
 
 @router.get("/api/gpus/{datacenter_id}")
 async def gpus(datacenter_id: str):
+    cached = metadata_cache.gpus(datacenter_id)
+    if cached:
+        return cached
     result = await asyncio.to_thread(get_available_gpus, datacenter_id)
     return [{"label": g[0], "id": g[1]} for g in result]
 
@@ -31,6 +38,9 @@ async def branches():
 
 @router.get("/api/variants")
 async def variants():
+    cached = metadata_cache.variants()
+    if cached["options"]:
+        return cached
     def _fetch():
         manifest = fetch_manifest()
         opts, lookup = build_variant_choices(manifest)

@@ -22,6 +22,14 @@ from podterm.sse import SSEHub, hub
 TELEMETRY_POLL_SEC = 5.0
 
 
+def _first_payload_value(payload: dict, *keys: str) -> object:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 class EventPipeline:
     """Owns the cross-thread event queue and the async drain + telemetry loops."""
 
@@ -109,9 +117,16 @@ class EventPipeline:
             self._handle_info_update(pod_id, "info", {"model_params": payload.get("model_params")},
                                      model_params=payload.get("model_params"))
         elif t == "config":
-            info = {k: payload.get(k) for k in ("seed", "seq_len", "batch_tokens", "grad_accum")}
-            self._handle_info_update(pod_id, "info", info, seed=payload.get("seed"),
-                                     seq_len=payload.get("seq_len"), batch_tokens=payload.get("batch_tokens"))
+            seed = _first_payload_value(payload, "seed")
+            seq_len = _first_payload_value(payload, "seq_len", "sequence_length")
+            batch_tokens = _first_payload_value(payload, "batch_tokens", "batch_size", "batch")
+            info = {
+                "seed": seed,
+                "seq_len": seq_len,
+                "batch_tokens": batch_tokens,
+                "grad_accum": payload.get("grad_accum"),
+            }
+            self._handle_info_update(pod_id, "info", info, seed=seed, seq_len=seq_len, batch_tokens=batch_tokens)
         elif t == "commit":
             info = {"commit_hash": payload.get("commit_hash"), "commit_msg": payload.get("commit_msg")}
             self._handle_info_update(pod_id, "info", info, **info)
