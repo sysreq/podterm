@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from podterm import db
 from podterm.diagnostics.compare import diff_docs
@@ -10,8 +11,16 @@ from podterm.diagnostics.compare import diff_docs
 router = APIRouter()
 
 
+class CompareRequest(BaseModel):
+    run_ids: list[str] = Field(default_factory=list)
+
+
 @router.get("/api/runs")
-async def list_runs(branch: str | None = None, gpu: str | None = None, limit: int = 100):
+async def list_runs(
+    branch: str | None = None,
+    gpu: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+):
     return db.list_runs(limit=limit, branch=branch, gpu=gpu)
 
 
@@ -27,10 +36,10 @@ async def get_run_diagnostics(run_id: str):
 
 
 @router.post("/api/compare")
-async def compare_runs(body: dict):
-    run_ids = body.get("run_ids", [])
+async def compare_runs(body: CompareRequest):
+    run_ids = body.run_ids
     if len(run_ids) < 2:
-        return {"error": "Select at least 2 runs"}
+        raise HTTPException(status_code=400, detail="Select at least 2 runs")
     metrics = db.get_metrics_multi(run_ids)
     runs = {rid: db.get_run(rid) for rid in run_ids}
     return {"metrics": metrics, "runs": runs, "diagnostics": _compare_diagnostics(run_ids)}

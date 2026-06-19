@@ -1,10 +1,11 @@
 // History tab: run table with filtering and compare-selection.
 import { app } from './state.js';
+import { escapeHtml } from './dom.js';
+import { fetchJson } from './api.js';
 
 export async function loadHistory() {
   try {
-    const r = await fetch('/api/runs');
-    app.historyRuns = await r.json();
+    app.historyRuns = await fetchJson('/api/runs');
     renderHistoryTable();
   } catch {}
 }
@@ -19,7 +20,7 @@ export function renderHistoryTable() {
   const area = document.getElementById('history-table-area');
   if (!runs.length) { area.innerHTML = '<div class="placeholder">No runs found.</div>'; return; }
 
-  let html = '<table><thead><tr><th></th><th>Date</th><th>Branch</th><th>Commit</th><th>GPU</th><th>Variant</th><th>Steps</th><th>Best BPB</th><th>Cost</th><th>Status</th><th></th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th></th><th>Date</th><th>Branch</th><th>Commit</th><th>GPU</th><th>Variant</th><th>Steps</th><th>Best BPB</th><th>Cost</th><th>Status</th></tr></thead><tbody>';
   for (const r of runs) {
     const checked = app.selectedRuns.has(r.run_id) ? 'checked' : '';
     const date = (r.started_at || '').slice(0, 16).replace('T', ' ');
@@ -32,10 +33,9 @@ export function renderHistoryTable() {
     else status = `exit ${r.exit_code}`;
 
     html += `<tr>
-      <td><input type="checkbox" ${checked} data-run-id="${r.run_id}"></td>
-      <td>${date}</td><td>${r.branch || '-'}</td><td>${commit}</td><td>${r.gpu_type || '-'}</td>
-      <td>${r.data_variant || '-'}</td><td>${r.total_steps || '-'}</td><td>${bpb}</td><td>${cost}</td><td>${status}</td>
-      <td><a href="/api/runs/${r.run_id}/log" target="_blank" style="color:var(--accent);text-decoration:none;font-size:11px">log</a></td>
+      <td><input type="checkbox" ${checked} data-run-id="${escapeHtml(r.run_id)}"></td>
+      <td>${escapeHtml(date)}</td><td>${escapeHtml(r.branch || '-')}</td><td>${escapeHtml(commit)}</td><td>${escapeHtml(r.gpu_type || '-')}</td>
+      <td>${escapeHtml(r.data_variant || '-')}</td><td>${escapeHtml(r.total_steps || '-')}</td><td>${escapeHtml(bpb)}</td><td>${escapeHtml(cost)}</td><td>${escapeHtml(status)}</td>
     </tr>`;
   }
   html += '</tbody></table>';

@@ -4,10 +4,12 @@ import { renderRunList, initRunList } from './runlist.js';
 import { renderLiveView, initLive } from './live.js';
 import { loadHistory, clearSelection, initHistory } from './history.js';
 import { compareSelected, initCompare } from './compare.js';
-import { openLaunchDialog, openImportDialog, initLaunch } from './launch.js';
+import { openLaunchDialog, initLaunch } from './launch.js';
 import { initLogs } from './logs.js';
 import { initConfigPanel } from './configpanel.js';
 import { initDiagnostics } from './diagnostics.js';
+import { escapeHtml } from './dom.js';
+import { fetchJson } from './api.js';
 
 // Browsers cap ~6 SSE connections per origin on HTTP/1.1 — stream at most
 // this many pods at once (the active pod always gets one).
@@ -38,7 +40,7 @@ function setCachePill(ok, text, title) {
 // of /api/pods so neither pill's failure affects the other.
 async function refreshCompileCache() {
   try {
-    const { address } = await fetch('/api/redis-server').then((r) => r.json());
+    const { address } = await fetchJson('/api/redis-server');
     if (address) setCachePill(true, 'Compile Cache', `Compile cache: ${address}`);
     else setCachePill(false, 'Compile Cache — none', 'No Redis compile-cache pod running');
   } catch {
@@ -68,8 +70,8 @@ function renderMachines() {
   }
   let html = '<table><thead><tr><th>Name</th><th>ID</th><th>Status</th><th>$/hr</th><th>Image</th></tr></thead><tbody>';
   for (const p of app.pods) {
-    html += `<tr><td>${p.name || '?'}</td><td>${p.id}</td><td>${p.desiredStatus || '?'}</td>
-      <td>${p.costPerHr != null ? '$' + p.costPerHr : '?'}</td><td style="font-size:11px">${p.imageName || '?'}</td></tr>`;
+    html += `<tr><td>${escapeHtml(p.name || '?')}</td><td>${escapeHtml(p.id)}</td><td>${escapeHtml(p.desiredStatus || '?')}</td>
+      <td>${escapeHtml(p.costPerHr != null ? '$' + p.costPerHr : '?')}</td><td style="font-size:11px">${escapeHtml(p.imageName || '?')}</td></tr>`;
   }
   area.innerHTML = html + '</tbody></table>';
 }
@@ -91,8 +93,7 @@ function connectRunningPods() {
 
 async function refreshPods() {
   try {
-    const r = await fetch('/api/pods');
-    app.pods = await r.json();
+    app.pods = await fetchJson('/api/pods');
     renderRunList(selectPod);
     connectRunningPods();
     const running = app.pods.filter((p) => p.desiredStatus === 'RUNNING').length;
@@ -120,7 +121,7 @@ async function stopPod() {
   if (!confirm(`Stop run on pod ${app.activePod}? The pod will be terminated.`)) return;
   setStatus(`Stopping run on ${app.activePod}…`);
   try {
-    await fetch(`/api/pods/${app.activePod}/stop`, { method: 'POST' });
+    await fetchJson(`/api/pods/${app.activePod}/stop`, { method: 'POST' });
     setStatus(`Run stopped (${app.activePod})`);
     dropPodState(app.activePod);
     app.activePod = null;
@@ -140,7 +141,6 @@ function init() {
   document.getElementById('btn-refresh').addEventListener('click', refreshPods);
   document.getElementById('btn-compare-selected').addEventListener('click', compareSelected);
   document.getElementById('btn-clear-selection').addEventListener('click', clearSelection);
-  document.getElementById('btn-import-logs').addEventListener('click', openImportDialog);
 
   on('status', ({ text }) => setStatus(text));
   on('pods:refresh', refreshPods);

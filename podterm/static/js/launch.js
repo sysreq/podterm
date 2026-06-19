@@ -1,5 +1,6 @@
-// Launch and log-import dialogs.
+// Launch dialog.
 import { app, emit } from './state.js';
+import { fetchJson } from './api.js';
 
 function setStatus(text) {
   emit('status', { text });
@@ -7,14 +8,20 @@ function setStatus(text) {
 
 export async function openLaunchDialog() {
   const dlg = document.getElementById('launch-dialog');
-  // Fetch form data in parallel
-  const [branches, dcs, variants, lastCfg, redis] = await Promise.all([
-    fetch('/api/branches').then((r) => r.json()),
-    fetch('/api/datacenters').then((r) => r.json()),
-    fetch('/api/variants').then((r) => r.json()),
-    fetch('/api/last-config').then((r) => r.json()),
-    fetch('/api/redis-server').then((r) => r.json()),
-  ]);
+  let branches, dcs, variants, lastCfg, redis;
+  try {
+    // Fetch form data in parallel
+    [branches, dcs, variants, lastCfg, redis] = await Promise.all([
+      fetchJson('/api/branches'),
+      fetchJson('/api/datacenters'),
+      fetchJson('/api/variants'),
+      fetchJson('/api/last-config'),
+      fetchJson('/api/redis-server'),
+    ]);
+  } catch (e) {
+    setStatus(`Launch metadata failed: ${e.message || e}`);
+    return;
+  }
   app.variantLookup = variants.lookup || {};
 
   fillSelect('f-branch', branches.map((b) => ({ label: b, id: b })), lastCfg.branch);
@@ -53,7 +60,7 @@ function fillSelect(id, options, defaultVal) {
 
 async function onDcChange() {
   const dc = document.getElementById('f-dc').value;
-  const gpus = await fetch(`/api/gpus/${dc}`).then((r) => r.json());
+  const gpus = await fetchJson(`/api/gpus/${dc}`);
   fillSelect('f-gpu', gpus, null);
 }
 
@@ -85,82 +92,19 @@ async function doLaunch() {
   setStatus('Launching...');
 
   try {
-    const r = await fetch('/api/pods/launch', {
+    const result = await fetchJson('/api/pods/launch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
     });
-    const result = await r.json();
     setStatus(`Run launched: ${result.name} ($${result.cost_per_hr}/hr)`);
     emit('pods:refresh', {});
     emit('pod:select', { podId: result.pod_id });
   } catch (e) {
-    setStatus(`Launch failed: ${e}`);
+    setStatus(`Launch failed: ${e.message || e}`);
   }
-}
-
-// ── Import Logs ──
-export async function openImportDialog() {
-  const dlg = document.getElementById('import-dialog');
-  const list = document.getElementById('import-list');
-  list.innerHTML = '<div class="placeholder">Scanning...</div>';
-  dlg.showModal();
-
-  const files = await fetch('/api/logs').then((r) => r.json());
-  if (!files.length) {
-    list.innerHTML = '<div class="placeholder">No log files found.</div>';
-    return;
-  }
-
-  let html = '<table><thead><tr><th>File</th><th>Size</th><th>Status</th><th></th></tr></thead><tbody>';
-  for (const f of files) {
-    const size = (f.size / 1024).toFixed(1) + ' KB';
-    const status = f.imported ? '<span style="color:var(--success)">imported</span>' : '<span style="color:var(--text-muted)">new</span>';
-    const btn = f.imported ? '' : `<button class="btn-import-one" style="padding:4px 12px;font-size:11px">Import</button>`;
-    html += `<tr data-path="${encodeURIComponent(f.path)}"><td style="font-size:11px">${f.name}</td><td>${size}</td><td>${status}</td><td>${btn}</td></tr>`;
-  }
-  html += '</tbody></table>';
-  list.innerHTML = html;
-}
-
-async function importSingleLog(path, btn) {
-  btn.disabled = true;
-  btn.textContent = '...';
-  try {
-    const r = await fetch('/api/logs/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
-    });
-    const result = await r.json();
-    if (result.error) { btn.textContent = 'Error'; return; }
-    btn.parentElement.previousElementSibling.innerHTML = '<span style="color:var(--success)">imported</span>';
-    btn.textContent = `${result.metrics} metrics`;
-    btn.style.border = '1px solid var(--success)';
-    emit('history:reload', {});
-  } catch { btn.textContent = 'Failed'; }
-}
-
-async function importAllLogs(btn) {
-  btn.disabled = true;
-  btn.textContent = 'Importing...';
-  try {
-    const r = await fetch('/api/logs/import-all', { method: 'POST' });
-    const result = await r.json();
-    btn.textContent = `Imported ${result.imported} logs`;
-    btn.style.border = '1px solid var(--success)';
-    openImportDialog(); // refresh the list
-    emit('history:reload', {});
-  } catch { btn.textContent = 'Failed'; }
 }
 
 export function initLaunch() {
   document.getElementById('f-dc').addEventListener('change', onDcChange);
   document.getElementById('btn-do-launch').addEventListener('click', doLaunch);
   document.getElementById('btn-launch-cancel').addEventListener('click', () => document.getElementById('launch-dialog').close());
-  document.getElementById('btn-import-all').addEventListener('click', (e) => importAllLogs(e.currentTarget));
-  document.getElementById('btn-import-close').addEventListener('click', () => document.getElementById('import-dialog').close());
-  document.getElementById('import-list').addEventListener('click', (e) => {
-    const btn = e.target.closest('button.btn-import-one');
-    if (!btn) return;
-    const row = btn.closest('tr[data-path]');
-    if (row) importSingleLog(decodeURIComponent(row.dataset.path), btn);
-  });
 }

@@ -1,5 +1,6 @@
 // Shared app state, per-pod live state, SSE ingestion, and the pub/sub bus.
 // SSE handlers only mutate buffers and emit bus events — no DOM access here.
+import { fetchJson } from './api.js';
 
 export const app = {
   activePod: null,
@@ -229,8 +230,7 @@ export async function hydrateFromDb(podId, force = false) {
 
   let rows;
   try {
-    const r = await fetch(`/api/runs/${podId}/metrics`);
-    rows = r.ok ? await r.json() : [];
+    rows = await fetchJson(`/api/runs/${podId}/metrics`);
   } catch {
     return;
   }

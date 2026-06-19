@@ -2,6 +2,8 @@
 // (verdict + headline side-by-side + per-block movers), and a summary table.
 import { app, emit } from './state.js';
 import { scaleY, lossYAxis, lossHover, plotLayout, plotConfig, COLORS } from './charts.js';
+import { escapeHtml } from './dom.js';
+import { fetchJson } from './api.js';
 
 let lastCompareData = null; // cached for re-render on chip removal / align toggle
 let alignMode = 'step';     // 'step' | 'progress'
@@ -10,12 +12,16 @@ export async function compareSelected() {
   if (app.selectedRuns.size < 2) { alert('Select at least 2 runs.'); return; }
   emit('tab:switch', { tab: 'compare' });
 
-  const r = await fetch('/api/compare', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ run_ids: [...app.selectedRuns] }),
-  });
-  lastCompareData = await r.json();
-  renderComparison();
+  try {
+    lastCompareData = await fetchJson('/api/compare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_ids: [...app.selectedRuns] }),
+    });
+    renderComparison();
+  } catch (e) {
+    document.getElementById('compare-placeholder').style.display = '';
+    document.getElementById('compare-placeholder').textContent = `Compare failed: ${e.message || e}`;
+  }
 }
 
 function removeFromComparison(runId) {
@@ -57,7 +63,7 @@ function renderComparison() {
   let chipsHtml = '<span>Comparing:</span>';
   for (const rid of Object.keys(data.runs)) {
     const label = runLabel(data.runs[rid] || {});
-    chipsHtml += `<div class="run-chip"><span>${label}</span><span class="chip-x" data-run-id="${rid}">&times;</span></div>`;
+    chipsHtml += `<div class="run-chip"><span>${escapeHtml(label)}</span><span class="chip-x" data-run-id="${escapeHtml(rid)}">&times;</span></div>`;
   }
   selEl.innerHTML = chipsHtml;
 
@@ -176,7 +182,7 @@ function renderHealthDiff(data) {
   };
 
   let html = '<div class="cmp-section-title">Model Health</div><table class="cmp-health"><thead><tr><th>Metric</th>';
-  for (const rid of ids) html += `<th>${runLabel(data.runs[rid] || {})}${rid === baseId ? ' <span class="cmp-base">base</span>' : ''}</th>`;
+  for (const rid of ids) html += `<th>${escapeHtml(runLabel(data.runs[rid] || {}))}${rid === baseId ? ' <span class="cmp-base">base</span>' : ''}</th>`;
   html += '</tr></thead><tbody>';
   // Verdict row
   html += '<tr class="cmp-verdict-row"><td>Verdict</td>';
@@ -187,7 +193,7 @@ function renderHealthDiff(data) {
   html += '</tr>';
   // Metric rows
   for (const id of order) {
-    html += `<tr><td>${labelOf(id)}</td>`;
+    html += `<tr><td>${escapeHtml(labelOf(id))}</td>`;
     for (const rid of ids) {
       const m = byRun[rid][id];
       html += `<td><span class="diag-band-${m?.band || 'na'}">${fmtHeadline(m)}</span></td>`;
@@ -202,8 +208,8 @@ function renderHealthDiff(data) {
       if (rid === baseId || !diag.diff[rid]) continue;
       const movers = (diag.diff[rid].movers || []).slice(0, 10);
       if (!movers.length) continue;
-      html += `<details class="cmp-movers"><summary>Top changes: ${runLabel(data.runs[rid] || {})} vs base (${movers.length})</summary><table class="cmp-health"><thead><tr><th>Metric</th><th>base → run (Δ)</th></tr></thead><tbody>`;
-      for (const mv of movers) html += `<tr><td class="diag-row-key">${mv.path}</td><td>${mv.text}</td></tr>`;
+      html += `<details class="cmp-movers"><summary>Top changes: ${escapeHtml(runLabel(data.runs[rid] || {}))} vs base (${movers.length})</summary><table class="cmp-health"><thead><tr><th>Metric</th><th>base → run (Δ)</th></tr></thead><tbody>`;
+      for (const mv of movers) html += `<tr><td class="diag-row-key">${escapeHtml(mv.path)}</td><td>${escapeHtml(mv.text)}</td></tr>`;
       html += '</tbody></table></details>';
     }
   }
@@ -221,7 +227,7 @@ function renderSummary(data) {
     const health = v
       ? `<span class="diag-band-${v === 'ok' ? 'good' : v === 'warn' ? 'warn' : 'bad'}">${VERDICT_LABEL[v]}</span>`
       : '-';
-    html += `<tr><td>${(run.pod_name || rid).slice(0, 20)}</td><td>${run.branch || '-'}</td><td>${run.gpu_type || '-'}</td><td>${run.total_steps || '-'}</td><td>${bpb}</td><td>${health}</td><td>${cost}</td></tr>`;
+    html += `<tr><td>${escapeHtml((run.pod_name || rid).slice(0, 20))}</td><td>${escapeHtml(run.branch || '-')}</td><td>${escapeHtml(run.gpu_type || '-')}</td><td>${escapeHtml(run.total_steps || '-')}</td><td>${escapeHtml(bpb)}</td><td>${health}</td><td>${escapeHtml(cost)}</td></tr>`;
   }
   html += '</tbody></table>';
   document.getElementById('compare-summary').innerHTML = html;

@@ -85,8 +85,8 @@
         <select id="baseline-select">
           <option value="">None</option>
         </select>
+        <button id="baseline-pin" class="btn-ghost" title="Pin selected baseline for future runs">Pin</button>
         <span id="baseline-target"></span>
-        <a id="btn-full-log" class="btn-ghost" target="_blank" rel="noopener">View Full Log</a>
       </div>
       <div id="charts-row">
         <div class="chart-box">
@@ -141,8 +141,6 @@
       <button id="btn-compare-selected">Compare Selected</button>
       <button id="btn-clear-selection">Clear</button>
       <span id="selection-count">0 selected</span>
-      <span style="margin-left: auto"></span>
-      <button id="btn-import-logs">Import Logs</button>
     </div>
     <div id="history-table-area"></div>
   </div>
@@ -210,17 +208,6 @@
   <pre id="config-json"></pre>
   <div class="btn-row">
     <button id="btn-config-close">Close</button>
-  </div>
-</dialog>
-
-<!-- Import Logs Dialog -->
-<dialog id="import-dialog">
-  <h3>Import Log Files</h3>
-  <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Scan .cache/logs/ and .local/examples/ for training logs to import into the database.</p>
-  <div id="import-list" style="max-height:400px;overflow-y:auto"></div>
-  <div class="btn-row">
-    <button id="btn-import-all" class="primary">Import All</button>
-    <button id="btn-import-close">Close</button>
   </div>
 </dialog>
 

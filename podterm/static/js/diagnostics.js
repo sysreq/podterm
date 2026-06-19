@@ -6,6 +6,8 @@
 // drill-down with trend-vs-previous, all from the one history fetch.
 import { app, emit, getPodState, on } from './state.js';
 import { attachSparkline } from './sparkline.js';
+import { escapeHtml } from './dom.js';
+import { fetchJson } from './api.js';
 
 const el = (id) => document.getElementById(id);
 let selectedStep = null; // which snapshot the detail view is pinned to (null = latest)
@@ -19,7 +21,7 @@ export function initDiagnostics() {
 async function load(runId) {
   let history;
   try {
-    history = await fetch(`/api/runs/${runId}/diagnostics`).then((r) => r.json());
+    history = await fetchJson(`/api/runs/${runId}/diagnostics`);
   } catch {
     return;
   }
@@ -74,9 +76,40 @@ function render(valid) {
     if (i >= 0) selIdx = i;
   }
 
+  content.appendChild(renderVerdictBar(valid));
   content.appendChild(renderTimeline(valid, selIdx));
-  content.appendChild(renderHeadline(valid));
+  content.appendChild(renderGroupedCards(valid));
   content.appendChild(renderDetail(valid, selIdx));
+}
+
+// ── verdict count bar: a proportional segmented bar from health.counts + a text legend ──
+const COUNT_ORDER = ['good', 'warn', 'bad', 'info', 'na'];
+function renderVerdictBar(valid) {
+  const wrap = document.createElement('div');
+  wrap.className = 'diag-verdict-bar';
+  const counts = valid[valid.length - 1].diag.health?.counts || {};
+  const total = COUNT_ORDER.reduce((a, b) => a + (counts[b] || 0), 0);
+  const track = document.createElement('div');
+  track.className = 'diag-vb-track';
+  if (total) {
+    for (const band of COUNT_ORDER) {
+      const n = counts[band] || 0;
+      if (!n) continue;
+      const seg = document.createElement('span');
+      seg.className = `diag-vb-seg diag-vb-${band}`;
+      seg.style.flexGrow = String(n);
+      seg.title = `${n} ${band}`;
+      track.appendChild(seg);
+    }
+  }
+  const legend = document.createElement('span');
+  legend.className = 'diag-vb-legend';
+  legend.textContent = COUNT_ORDER
+    .filter((b) => counts[b])
+    .map((b) => `${counts[b]} ${b}`)
+    .join(' · ') || 'no metrics';
+  wrap.append(track, legend);
+  return wrap;
 }
 
 // ── status timeline (clickable: pins the detail view to a step) ──
@@ -95,30 +128,63 @@ function renderTimeline(valid, selIdx) {
   return timeline;
 }
 
-// ── producer-curated headline metrics with threshold colour + cross-snapshot sparkline ──
-function renderHeadline(valid) {
-  const table = document.createElement('div');
-  table.className = 'diag-metrics';
-  const headline = valid[valid.length - 1].diag.health?.headline || [];
-  for (const m of headline) {
-    const series = valid
-      .map((h) => (h.diag.health?.headline || []).find((x) => x.id === m.id)?.value)
-      .filter((v) => v != null);
-    const row = document.createElement('div');
-    row.className = 'diag-metric-row';
-    const name = document.createElement('span');
-    name.className = 'diag-metric-label';
-    name.textContent = m.label;
-    const val = document.createElement('span');
-    val.className = `diag-metric-val ${bandClass(m.band)}`;
-    val.textContent = fmtVal(m.value, m.unit);
-    const spark = document.createElement('span');
-    spark.className = 'diag-metric-spark';
-    row.append(name, val, spark);
-    table.appendChild(row);
-    if (series.length > 1) attachSparkline(spark).update(series);
+// ── producer-curated headline metrics as tiles grouped by concept (capacity/flow/grad/arch) ──
+const GROUP_ORDER = ['capacity', 'flow', 'grad', 'arch'];
+const GROUP_LABEL = { capacity: 'Capacity', flow: 'Flow', grad: 'Gradients', arch: 'Architecture' };
+
+function renderGroupedCards(valid) {
+  const wrap = document.createElement('div');
+  wrap.className = 'diag-groups';
+  const latest = valid[valid.length - 1].diag.health?.headline || [];
+  const prev = valid.length > 1 ? (valid[valid.length - 2].diag.health?.headline || []) : [];
+  const prevVal = (id) => prev.find((x) => x.id === id)?.value;
+
+  // Fixed group order first, then any unexpected groups appended so nothing silently vanishes.
+  const seen = new Set(GROUP_ORDER);
+  const groups = GROUP_ORDER.concat([...new Set(latest.map((m) => m.group))].filter((g) => !seen.has(g)));
+
+  for (const g of groups) {
+    const metrics = latest.filter((m) => m.group === g);
+    if (!metrics.length) continue;
+
+    const head = document.createElement('div');
+    head.className = 'diag-group';
+    head.textContent = GROUP_LABEL[g] || g || 'Other';
+    wrap.appendChild(head);
+
+    const grid = document.createElement('div');
+    grid.className = 'diag-cards';
+    for (const m of metrics) {
+      const series = valid
+        .map((h) => (h.diag.health?.headline || []).find((x) => x.id === m.id)?.value)
+        .filter((v) => v != null);
+      const card = document.createElement('div');
+      card.className = 'diag-card';
+
+      const label = document.createElement('div');
+      label.className = 'diag-card-label';
+      label.textContent = m.label;
+
+      const valLine = document.createElement('div');
+      valLine.className = 'diag-card-valline';
+      const val = document.createElement('span');
+      val.className = `diag-card-val ${bandClass(m.band)}`;
+      val.textContent = fmtVal(m.value, m.unit);
+      const trend = document.createElement('span');
+      trend.className = 'diag-card-trend';
+      trend.textContent = trendArrow(m.value, prevVal(m.id));
+      valLine.append(val, trend);
+
+      const spark = document.createElement('div');
+      spark.className = 'diag-card-spark';
+
+      card.append(label, valLine, spark);
+      grid.appendChild(card);
+      if (series.length > 1) attachSparkline(spark).update(series);
+    }
+    wrap.appendChild(grid);
   }
-  return table;
+  return wrap;
 }
 
 // ── per-section / per-block detail for the selected snapshot, with trend vs the previous one ──
@@ -134,14 +200,17 @@ function renderDetail(valid, selIdx) {
   head.textContent = `Step ${valid[selIdx].step} — per-section detail${prev ? ` (▲▼ vs step ${valid[selIdx - 1].step})` : ''}`;
   wrap.appendChild(head);
 
-  for (const s of (cur.sections || [])) {
+  // Worst-first so problems sort to the top; sections are open by default (data not hidden).
+  const sevRank = (st) => (st === 'error' ? 2 : st === 'partial' ? 1 : 0);
+  const sections = [...(cur.sections || [])].sort((a, b) => sevRank(b.status) - sevRank(a.status));
+
+  for (const s of sections) {
     const sec = document.createElement('details');
     sec.className = 'diag-section';
-    // Open the sections that aren't clean so problems are visible without a click.
-    sec.open = s.status === 'error' || s.status === 'partial';
+    sec.open = true;
     const summary = document.createElement('summary');
-    summary.innerHTML = `<span class="diag-sec-name">${s.name}</span>` +
-      `<span class="diag-sec-status diag-${s.status}">${s.status}${s.reason ? ': ' + s.reason : ''}</span>`;
+    summary.innerHTML = `<span class="diag-sec-name">${escapeHtml(s.name)}</span>` +
+      `<span class="diag-sec-status diag-${escapeHtml(s.status)}">${escapeHtml(s.status)}${s.reason ? ': ' + escapeHtml(s.reason) : ''}</span>`;
     sec.appendChild(summary);
 
     const rows = s.rows || {};
@@ -183,12 +252,12 @@ function fmtRowMetrics(metrics, prev) {
     if (k === '_unverified') continue;
     if (typeof v === 'number' && isFinite(v)) {
       const pv = prev && typeof prev[k] === 'number' ? prev[k] : null;
-      parts.push(`<span class="diag-kv"><b>${k}</b> ${fmtVal(v)}<span class="diag-trend">${trendArrow(v, pv)}</span></span>`);
+      parts.push(`<span class="diag-kv"><b>${escapeHtml(k)}</b> ${escapeHtml(fmtVal(v))}<span class="diag-trend">${escapeHtml(trendArrow(v, pv))}</span></span>`);
     } else if (Array.isArray(v) && v.length && v.every((x) => typeof x === 'number')) {
       const mean = v.reduce((a, b) => a + b, 0) / v.length;
-      parts.push(`<span class="diag-kv"><b>${k}</b> [${v.length}] μ${fmtVal(mean)} <span class="diag-trend">min ${fmtVal(Math.min(...v))} max ${fmtVal(Math.max(...v))}</span></span>`);
+      parts.push(`<span class="diag-kv"><b>${escapeHtml(k)}</b> [${v.length}] μ${escapeHtml(fmtVal(mean))} <span class="diag-trend">min ${escapeHtml(fmtVal(Math.min(...v)))} max ${escapeHtml(fmtVal(Math.max(...v)))}</span></span>`);
     } else if (typeof v === 'string') {
-      parts.push(`<span class="diag-kv"><b>${k}</b> ${v}</span>`);
+      parts.push(`<span class="diag-kv"><b>${escapeHtml(k)}</b> ${escapeHtml(v)}</span>`);
     }
   }
   if (metrics._unverified) parts.push('<span class="diag-unverified">unverified</span>');
