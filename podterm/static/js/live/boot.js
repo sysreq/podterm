@@ -1,9 +1,31 @@
-import { getPodState } from '../state.js';
+import { app, getPodState } from '../state.js';
 
-// Any phase/metric implies the container booted (those only originate inside it),
-// so reconnects to an already-running pod never get stuck in boot mode.
-function isBooting(state) {
-  return !!(state.boot && !state.boot.done && !state.lastMetric && !state.phase && !state.finished);
+function hasInfo(state) {
+  return Object.values(state.info || {}).some((v) => v != null && v !== '');
+}
+
+// These signals only exist after the container/event daemon is reachable. They
+// prevent reconnects to already-running pods from getting stuck behind boot UI.
+export function hasContainerEvidence(state) {
+  return !!(
+    state.boot?.done ||
+    state.lastMetric ||
+    state.phase ||
+    state.finished ||
+    state.memory ||
+    state.telemetry ||
+    state.summary ||
+    state.diagnostic ||
+    state.containerConnected ||
+    hasInfo(state)
+  );
+}
+
+export function isBooting(state, pod = {}) {
+  if (state.streamUnavailable) return false;
+  if (hasContainerEvidence(state)) return false;
+  if (state.boot && !state.boot.done) return true;
+  return pod.desiredStatus === 'RUNNING';
 }
 
 const LAYER_STATE_LABELS = {
@@ -41,16 +63,30 @@ function renderBootPanel(boot) {
   }
 }
 
+function provisionalBoot(pod) {
+  return {
+    stage: 'Starting container',
+    image: pod.imageName || '',
+    message: 'Waiting for machine logs…',
+    layers: [],
+    total: 0,
+    complete: 0,
+    pct: 0,
+  };
+}
+
 export function updateBootPanel(podId) {
   const view = document.getElementById('live-view');
   const state = getPodState(podId);
-  const booting = isBooting(state);
+  const pod = app.pods.find((p) => p.id === podId) || {};
+  const booting = isBooting(state, pod);
   const was = view.classList.contains('booting');
   view.classList.toggle('booting', booting);
   if (booting) {
-    renderBootPanel(state.boot);
+    renderBootPanel(state.boot || provisionalBoot(pod));
   } else if (was && window.Plotly) {
     // Charts laid out while hidden have zero width — resize on reveal.
     view.querySelectorAll('.js-plotly-plot').forEach((p) => Plotly.Plots.resize(p));
   }
+  return booting;
 }

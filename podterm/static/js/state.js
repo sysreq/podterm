@@ -38,6 +38,8 @@ function freshState() {
     telemetry: null,   // {cpu_pct, mem_pct, gpu_util_pct, gpu_mem_pct, uptime_s}
     telemetryHistory: [], // recent gpu_util_pct samples
     boot: null,        // {stage, image, message, layers, total, complete, pct, done}
+    containerConnected: false,
+    streamUnavailable: false,
     summary: null,     // {final_val_bpb, best_val_bpb, final_val_loss}
     diagnostic: null,  // latest off-pod health: {step, status, health} (from SSE or the panel's fetch)
     phase: null,
@@ -147,6 +149,10 @@ export function ensurePodStream(podId) {
 
   es.addEventListener('log', (e) => {
     const d = JSON.parse(e.data);
+    if (d.line.startsWith('Event daemon connected')) state.containerConnected = true;
+    if (d.line.startsWith('No event-daemon token') || d.line.startsWith('Event daemon auth failed')) {
+      state.streamUnavailable = true;
+    }
     pushLog(state, d.line);
     emit('pod:log', { podId, line: d.line });
   });

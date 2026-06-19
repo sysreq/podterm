@@ -7,14 +7,10 @@ import { updateBootPanel } from './live/boot.js';
 import { loadBaselineOptions, onBaselineChange, onPinBaselineClick } from './live/baseline.js';
 import { buildKpiRow, hasKpiCards, updateKpis } from './live/kpis.js';
 
-export function renderLiveView(podId) {
-  ensurePodStream(podId);
-  hydrateRunRow(podId);
-  hydrateFromDb(podId);
-  const state = getPodState(podId);
+let dashboardPodId = null;
 
-  document.getElementById('live-placeholder').style.display = 'none';
-  document.getElementById('live-view').classList.add('visible');
+function renderLiveDashboard(podId) {
+  const state = getPodState(podId);
   buildKpiRow();
   initLiveCharts();
   updateKpis(podId);
@@ -23,6 +19,30 @@ export function renderLiveView(podId) {
   renderLogs(podId);
   renderConfigPanel(podId);
   loadBaselineOptions(podId);
+  dashboardPodId = podId;
+}
+
+function ensureLiveDashboard(podId) {
+  if (dashboardPodId === podId && hasKpiCards()) return;
+  renderLiveDashboard(podId);
+}
+
+function syncLiveView(podId) {
+  if (app.activePod !== podId) return false;
+  const booting = updateBootPanel(podId);
+  if (!booting) ensureLiveDashboard(podId);
+  return !booting;
+}
+
+export function renderLiveView(podId) {
+  ensurePodStream(podId);
+  hydrateRunRow(podId);
+  hydrateFromDb(podId);
+
+  document.getElementById('live-placeholder').style.display = 'none';
+  const booting = updateBootPanel(podId);
+  document.getElementById('live-view').classList.add('visible');
+  if (!booting) renderLiveDashboard(podId);
 }
 
 export function initLive() {
@@ -30,26 +50,30 @@ export function initLive() {
   document.getElementById('baseline-pin').addEventListener('click', onPinBaselineClick);
 
   on('pod:metric', ({ podId }) => {
-    if (app.activePod !== podId || !hasKpiCards()) return;
+    if (!syncLiveView(podId) || !hasKpiCards()) return;
     updateLiveCharts(getPodState(podId));
     updateKpis(podId);
   });
 
   on('pod:boot', ({ podId }) => {
+    syncLiveView(podId);
+  });
+
+  on('pod:log', ({ podId }) => {
     if (app.activePod !== podId) return;
-    updateBootPanel(podId);
+    if (document.getElementById('live-view').classList.contains('booting')) syncLiveView(podId);
   });
 
   for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase', 'pod:telemetry', 'pod:diagnostic', 'pod:health']) {
     on(evt, ({ podId }) => {
-      if (app.activePod !== podId) return;
+      if (!syncLiveView(podId)) return;
       updateKpis(podId);
     });
   }
 
-  for (const evt of ['pod:reset', 'pod:hydrated']) {
+  for (const evt of ['pod:reset', 'pod:hydrated', 'pod:run-row']) {
     on(evt, ({ podId }) => {
-      if (app.activePod !== podId || !hasKpiCards()) return;
+      if (!syncLiveView(podId) || !hasKpiCards()) return;
       const state = getPodState(podId);
       updateLiveCharts(state);
       updateBaselineTrace(state);
