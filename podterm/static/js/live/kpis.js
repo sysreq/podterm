@@ -1,6 +1,6 @@
 import { app, getPodState } from '../state.js';
 import * as d from '../derive.js';
-import { fmtInt, fmtMoney, fmtClock, fmtDuration, fmtDelta, fmtSecShort } from '../format.js';
+import { fmtInt, fmtMoney, fmtClock, fmtDuration, fmtDelta, fmtMs, fmtSecShort, fmtTps } from '../format.js';
 import { kpiCard } from '../cards.js';
 import { updateBootPanel } from './boot.js';
 import { updateBaselineRow, updateRaceBanner } from './race.js';
@@ -19,7 +19,7 @@ export function buildKpiRow() {
     projected: kpiCard({ label: 'Projected Finish', spark: true,
       tooltip: 'Remaining steps × EMA-50 of step time; sparkline shows recent ms/step' }),
     hero: kpiCard({ label: 'Baseline', hero: true,
-      tooltip: 'Race vs the selected baseline: per-step ms delta and cumulative time ahead or behind — independent quantities' }),
+      tooltip: 'Quality race vs the selected baseline: training wall-clock ahead/behind to reach the current loss, plus live throughput' }),
     loss: kpiCard({ label: 'Loss (train)',
       tooltip: 'Latest training loss, with change vs ~100 steps earlier' }),
     gpu: kpiCard({ label: 'GPU', bar: true,
@@ -200,7 +200,7 @@ export function updateKpis(podId) {
     cards.loss.note(waitMsg);
     updateCostCard(state, pod, null);
     updateRaceBanner(state, null, null, null);
-    updateBaselineRow(null);
+    updateBaselineRow(state, null);
     return;
   }
 
@@ -226,22 +226,28 @@ export function updateKpis(podId) {
   }
   if (cards.projected.spark) cards.projected.spark(msSeries);
 
-  const race = d.raceStatus({
+  // Shared quality-vs-time race math (also feeds the banner and sidebar pace lines)
+  const batchTokens = state.info.batch_tokens ?? state.runRow?.batch_tokens ?? null;
+  const race = d.qualityRace({
     metric: m,
-    baselineByStep: state.baselineByStep,
-    baselineSteps: state.baselineSteps,
+    history: state.metricHistory,
+    baselineSamples: state.baselineSteps.map((s) => state.baselineByStep[s]),
     baselineTotalTimeMs: state.baselineTotalTimeMs,
-    emaMs: ema100,
+    batchTokens,
+    emaMsPerStep: ema100,
+    baselineSample: d.baselineAtStep(state.baselineByStep, state.baselineSteps, m.step),
   });
 
+  // 2 — Ahead/Behind hero (quality lead + live throughput)
   if (race.state === 'ahead' || race.state === 'behind') {
     const ahead = race.state === 'ahead';
+    const tput = race.throughputTps != null ? `${fmtTps(race.throughputTps)} tok/s` : `${fmtMs(race.msPerStep)} ms/step`;
     cards.hero.set({
-      value: fmtDelta(race.perStepMs, 1),
-      unit: 'ms/step',
-      sub: `${fmtSecShort(race.cumulativeMs)} ${ahead ? 'ahead' : 'behind'} overall`,
+      value: fmtSecShort(race.leadMs),
+      unit: ahead ? 'ahead' : 'behind',
+      sub: `at ${race.currentLoss != null ? race.currentLoss.toFixed(3) : '?'} loss · ${tput}`,
       subClass: ahead ? 'success' : 'danger',
-      caption: ahead ? 'On pace to win' : 'Falling behind',
+      caption: ahead ? 'Reaching loss sooner' : 'Reaching loss slower',
       captionClass: ahead ? 'success' : 'danger',
       accent: ahead ? 'success' : 'danger',
     });
@@ -264,5 +270,5 @@ export function updateKpis(podId) {
 
   updateCostCard(state, pod, eta);
   updateRaceBanner(state, m, race, eta);
-  updateBaselineRow(race);
+  updateBaselineRow(state, race);
 }

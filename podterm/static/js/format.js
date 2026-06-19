@@ -43,3 +43,11 @@ export function fmtDelta(x, digits = 1) {
 export function fmtSteps(step, total) {
   return `${fmtInt(step)} / ${fmtInt(total)}`;
 }
+
+// Tokens/sec with a magnitude suffix: 523000 -> "523k", 1_200_000 -> "1.2M"
+export function fmtTps(tps) {
+  if (tps == null) return '?';
+  if (tps >= 1e6) return `${(tps / 1e6).toFixed(2)}M`;
+  if (tps >= 1e3) return `${Math.round(tps / 1e3)}k`;
+  return `${Math.round(tps)}`;
+}

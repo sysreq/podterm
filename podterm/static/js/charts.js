@@ -1,6 +1,6 @@
-// Shared Plotly configuration + the two Live charts (Training Loss and
-// Step Time / Throughput). Traces are created once at init with fixed
-// indices and updated via restyle — no index juggling.
+// Shared Plotly configuration + the Live Training Loss chart. Traces are
+// created once at init with fixed indices and updated via restyle — no
+// index juggling. (Throughput now lives in the race banner readout.)
 
 export const COLORS = ['#ffd166', '#ff6b6b', '#48dbfb', '#81ecec', '#a29bfe', '#fd79a8'];
 
@@ -11,7 +11,6 @@ export const CHART_TEXT = '#8e9ab8';
 const SER_CURRENT = '#4a9eff';
 const SER_BASELINE = 'rgba(232,237,248,0.40)';
 const SER_EVALS = '#a78bfa';
-const SER_STEPTIME = '#fbbf24';
 
 // Piecewise-linear y transform for loss: equal plot spacing between anchor
 // ticks, finer anchors near the loss floor. Loss spans less than a decade,
@@ -48,16 +47,14 @@ export const plotLayout = {
 
 export const plotConfig = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };
 
-// ── Live chart pair ──
+// ── Live loss chart ──
 let lossEl = null;
-let stepEl = null;
 let xDomainMax = null;
 
 const liveLegend = { orientation: 'h', x: 1, xanchor: 'right', y: 1.12, font: { size: 11 }, bgcolor: 'transparent' };
 
 export function initLiveCharts() {
   lossEl = document.getElementById('chart-loss');
-  stepEl = document.getElementById('chart-step');
   if (!lossEl || lossEl.data) return; // already initialized
 
   Plotly.newPlot(lossEl, [
@@ -72,29 +69,13 @@ export function initLiveCharts() {
     ...plotLayout, height: lossEl.clientHeight || 280,
     yaxis: { ...lossYAxis }, legend: liveLegend, hovermode: 'x unified',
   }, plotConfig);
-
-  Plotly.newPlot(stepEl, [
-    { x: [], y: [], name: 'ms/step', type: 'scatter', mode: 'lines',
-      line: { color: SER_STEPTIME, width: 2 },
-      hovertemplate: 'Step %{x}<br>%{y:.1f} ms<extra></extra>' },
-    { x: [], y: [], customdata: [], name: 'evals', type: 'scatter', mode: 'markers',
-      marker: { symbol: 'diamond', size: 7, color: SER_EVALS },
-      hovertemplate: 'Eval @ step %{x}<br>val_bpb %{customdata:.4f}<extra></extra>' },
-  ], {
-    ...plotLayout, height: stepEl.clientHeight || 280,
-    yaxis: { gridcolor: CHART_GRID, zerolinecolor: CHART_GRID, title: { text: 'ms', font: { size: 11 } }, rangemode: 'tozero' },
-    // Right axis reserved for samples/s — no emitter for it yet (chip in the header says so).
-    yaxis2: { title: { text: 'samples/s', font: { size: 11 } }, overlaying: 'y', side: 'right',
-              showgrid: false, zeroline: false, range: [0, 1], showticklabels: false },
-    legend: liveLegend, hovermode: 'x unified',
-  }, plotConfig);
 }
 
 export function chartsReady() {
   return Boolean(lossEl && lossEl.data);
 }
 
-// Redraw both charts from the pod's buffers (cheap restyle at metric cadence).
+// Redraw the loss chart from the pod's buffers (cheap restyle at metric cadence).
 export function updateLiveCharts(state) {
   if (!chartsReady()) return;
 
@@ -105,16 +86,6 @@ export function updateLiveCharts(state) {
     y: [pts.map((m) => scaleY(m.train_loss)), evalPts.map((e) => scaleY(e.val_loss))],
     customdata: [pts.map((m) => m.train_loss), evalPts.map((e) => e.val_bpb)],
   }, [0, 2]);
-
-  const stepPts = state.metricHistory.filter((m) => m.step_avg_ms != null);
-  const stepEvalPts = state.evals
-    .map((e) => ({ ...e, ms: state.metricByStep.get(e.step)?.step_avg_ms }))
-    .filter((e) => e.ms != null);
-  Plotly.restyle(stepEl, {
-    x: [stepPts.map((m) => m.step), stepEvalPts.map((e) => e.step)],
-    y: [stepPts.map((m) => m.step_avg_ms), stepEvalPts.map((e) => e.ms)],
-    customdata: [null, stepEvalPts.map((e) => e.val_bpb)],
-  }, [0, 1]);
 
   syncXDomain(state);
 }
@@ -127,14 +98,12 @@ export function updateBaselineTrace(state) {
   syncXDomain(state, true);
 }
 
-// Both charts share one x domain: [0, furthest step seen by either series].
+// X domain: [0, furthest step seen by the current or baseline series].
 function syncXDomain(state, force = false) {
   const lastStep = state.lastMetric?.step ?? 0;
   const lastBaseline = state.baselineSteps.length ? state.baselineSteps[state.baselineSteps.length - 1] : 0;
   const max = Math.max(lastStep, lastBaseline);
   if (!max || (max === xDomainMax && !force)) return;
   xDomainMax = max;
-  const range = [0, max * 1.02];
-  Plotly.relayout(lossEl, { 'xaxis.range': range });
-  Plotly.relayout(stepEl, { 'xaxis.range': range });
+  Plotly.relayout(lossEl, { 'xaxis.range': [0, max * 1.02] });
 }
