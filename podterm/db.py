@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS runs (
     commit_msg          TEXT,
     gpu_type            TEXT,
     gpu_count           INTEGER DEFAULT 1,
+    driver_version      TEXT,
+    cuda_version        TEXT,
+    seed                INTEGER,
+    seq_len             INTEGER,
+    batch_tokens        INTEGER,
     datacenter          TEXT,
     data_variant        TEXT,
     vocab_size          INTEGER,
@@ -84,7 +89,19 @@ def _get_conn() -> sqlite3.Connection:
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute("PRAGMA foreign_keys=ON")
         _conn.executescript(_SCHEMA)
+        _migrate(_conn)
     return _conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Idempotent column adds for DBs created before a schema bump (CREATE TABLE IF NOT EXISTS
+    won't add columns to an existing table)."""
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(runs)")}
+    for col, decl in (("driver_version", "TEXT"), ("cuda_version", "TEXT"),
+                      ("seed", "INTEGER"), ("seq_len", "INTEGER"), ("batch_tokens", "INTEGER")):
+        if col not in have:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {col} {decl}")
+    conn.commit()
 
 
 def close() -> None:
@@ -253,6 +270,18 @@ def get_metrics_multi(run_ids: list[str]) -> dict[str, list[dict]]:
     for rid in run_ids:
         result[rid] = get_metrics(rid)
     return result
+
+
+def get_eval_bpb_near(run_id: str, step: int) -> float | None:
+    """The val_bpb recorded closest to `step` (evals are sparse, rarely on a snapshot step).
+    Used to reconcile the off-pod diagnostics BPB against the on-pod eval. None if no eval yet."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT val_bpb FROM metrics WHERE run_id = ? AND val_bpb IS NOT NULL "
+        "ORDER BY ABS(step - ?) LIMIT 1",
+        (run_id, step),
+    ).fetchone()
+    return row["val_bpb"] if row else None
 
 
 # ---------------------------------------------------------------------------

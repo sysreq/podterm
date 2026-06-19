@@ -62,6 +62,9 @@ function updateBootPanel(podId) {
 }
 
 // ── KPI row ──
+// Aggressively slimmed: the operational essentials + one Model Health verdict. CPU/RAM collapse
+// into a single System card; GPU util + memory share one card. Diagnostics depth lives in the
+// Model Health panel below (the verdict card click-scrolls to it).
 function buildKpiRow() {
   if (cards) return;
   const row = document.getElementById('kpi-row');
@@ -70,44 +73,35 @@ function buildKpiRow() {
       tooltip: 'Remaining steps × EMA-50 of step time; sparkline shows recent ms/step' }),
     hero: kpiCard({ label: 'Baseline', hero: true,
       tooltip: 'Race vs the selected baseline: per-step ms delta and cumulative time ahead or behind — independent quantities' }),
-    avg: kpiCard({ label: 'Avg ms/step',
-      tooltip: 'EMA-100 of step time; the target is the pace needed from here to beat the baseline' }),
     loss: kpiCard({ label: 'Loss (train)',
       tooltip: 'Latest training loss, with change vs ~100 steps earlier' }),
-    cpu: kpiCard({ label: 'CPU Usage', bar: true,
-      tooltip: 'Container CPU utilization from RunPod telemetry' }),
-    ram: kpiCard({ label: 'RAM Usage', bar: true,
-      tooltip: 'Container memory utilization from RunPod telemetry' }),
-    gpu: kpiCard({ label: 'GPU Usage', bar: true,
-      tooltip: 'GPU busy percentage from RunPod telemetry' }),
-    gpumem: kpiCard({ label: 'GPU Memory', bar: true,
-      tooltip: 'Live GPU memory vs device total while running; trainer-reported peak after the run' }),
+    gpu: kpiCard({ label: 'GPU', bar: true,
+      tooltip: 'GPU utilization (bar/value) and memory (sub-line) from RunPod telemetry' }),
     cost: kpiCard({ label: 'Cost So Far',
       tooltip: 'Wall-clock elapsed × hourly rate from pod metadata, plus projected total at current pace' }),
+    health: kpiCard({ label: 'Model Health',
+      tooltip: 'Off-pod diagnostics verdict on the latest snapshot — click to open the Model Health panel' }),
   };
-  for (const key of ['projected', 'hero', 'avg', 'loss', 'cpu', 'ram', 'gpu', 'gpumem', 'cost']) {
+  for (const key of ['projected', 'hero', 'loss', 'gpu', 'cost', 'health']) {
     row.appendChild(cards[key].el);
   }
+  // The verdict card is a doorway into the detail panel.
+  cards.health.el.classList.add('clickable');
+  cards.health.el.addEventListener('click', () => {
+    const p = document.getElementById('diagnostics-panel');
+    if (p && !p.hidden) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 
-  // Diagnostics row — 4 metrics await emitters in gpt-golf; Validation BPB is live.
+  // Secondary row: live Validation BPB + a consolidated System (CPU/RAM) card.
   const diagRow = document.getElementById('diag-row');
   diag = {
-    attn: kpiCard({ label: 'Attention Entropy', variant: 'diag', spark: true,
-      tooltip: 'Mean attention entropy across layers, in bits — how spread out attention is' }),
-    grad: kpiCard({ label: 'Grad Norm', variant: 'diag', spark: true,
-      tooltip: 'L2 norm of the gradient — spikes flag training instability' }),
-    logit: kpiCard({ label: 'Logit Saturation', variant: 'diag', spark: true,
-      tooltip: 'Share of logits near the activation ceiling — high values mean squashed outputs' }),
-    loader: kpiCard({ label: 'Dataloader Wait', variant: 'diag', spark: true,
-      tooltip: 'Fraction of step time spent waiting on the dataloader instead of compute' }),
     vbpb: kpiCard({ label: 'Validation BPB', variant: 'diag', spark: true,
       tooltip: 'Bits per byte on the validation set at each eval — lower is better' }),
+    system: kpiCard({ label: 'System', variant: 'diag', bar: true,
+      tooltip: 'CPU utilization (bar/value) and RAM (sub-line) from RunPod telemetry' }),
   };
-  for (const key of ['attn', 'grad', 'logit', 'loader', 'vbpb']) {
+  for (const key of ['vbpb', 'system']) {
     diagRow.appendChild(diag[key].el);
-  }
-  for (const key of ['attn', 'grad', 'logit', 'loader']) {
-    diag[key].note('Awaiting emitter', { pending: true });
   }
 }
 
@@ -160,61 +154,83 @@ function updateCostCard(state, pod, eta) {
   });
 }
 
-function pctCard(card, pct, sub = '') {
-  card.set({ value: String(Math.round(pct)), unit: '%', sub });
-  card.bar.set(pct / 100);
-}
-
 function updateTelemetryCards(state, pod) {
   const t = state.telemetry;
   const running = pod.desiredStatus === 'RUNNING';
   const live = running && t;
 
+  // System card: CPU utilization as the headline, RAM folded into the sub-line.
   if (live && t.cpu_pct != null) {
-    pctCard(cards.cpu, t.cpu_pct, t.cpu_name || '');
-  } else noteTelemetry(cards.cpu, running);
-  if (live && t.mem_pct != null) {
-    const ramSub = t.ram_total_gb
-      ? `${((t.mem_pct / 100) * t.ram_total_gb).toFixed(1)} / ${t.ram_total_gb} GB`
-      : '';
-    pctCard(cards.ram, t.mem_pct, ramSub);
-  } else noteTelemetry(cards.ram, running);
-  if (live && t.gpu_util_pct != null) pctCard(cards.gpu, t.gpu_util_pct);
-  else noteTelemetry(cards.gpu, running);
+    const ramSub = t.mem_pct != null
+      ? (t.ram_total_gb
+          ? `RAM ${((t.mem_pct / 100) * t.ram_total_gb).toFixed(1)}/${t.ram_total_gb} GB`
+          : `RAM ${Math.round(t.mem_pct)}%`)
+      : (t.cpu_name || '');
+    diag.system.set({ value: String(Math.round(t.cpu_pct)), unit: '% CPU', sub: ramSub });
+    diag.system.bar.set(t.cpu_pct / 100);
+  } else noteTelemetry(diag.system, running);
 
-  // GPU memory: live used/total while running; trainer-reported peak after.
-  // Device total comes from telemetry metadata; GPU-name parse is the fallback
-  // for stopped pods where no telemetry flows.
+  // GPU card: utilization headline + memory in the sub-line (live used/total, or peak after the run).
   const gpuName = state.info.gpu_type || state.runRow?.gpu_type || podGpuName(pod);
   const totalGiB = (t && t.gpu_mem_total_gb) || d.parseGpuMemGiB(gpuName);
+  let memSub = '';
   if (live && t.gpu_mem_pct != null) {
-    if (totalGiB) {
-      const usedGiB = (t.gpu_mem_pct / 100) * totalGiB;
-      cards.gpumem.set({
-        value: `${usedGiB.toFixed(1)}/${totalGiB}`, unit: 'GB',
-        sub: `${Math.round(t.gpu_mem_pct)}% of device · live`,
-      });
-    } else {
-      cards.gpumem.set({ value: String(Math.round(t.gpu_mem_pct)), unit: '%',
-        sub: 'Live · device total unknown' });
-    }
-    cards.gpumem.bar.set(t.gpu_mem_pct / 100);
+    memSub = totalGiB
+      ? `${((t.gpu_mem_pct / 100) * totalGiB).toFixed(1)}/${totalGiB} GB · live`
+      : `${Math.round(t.gpu_mem_pct)}% mem · live`;
   } else if (state.memory) {
     const usedGiB = state.memory.peak_mib / 1024;
-    if (totalGiB) {
-      cards.gpumem.set({
-        value: `${usedGiB.toFixed(1)}/${totalGiB}`, unit: 'GB',
-        sub: `Peak · reserved ${(state.memory.reserved_mib / 1024).toFixed(1)} GB`,
-      });
-      cards.gpumem.bar.set(usedGiB / totalGiB);
-    } else {
-      cards.gpumem.set({ value: usedGiB.toFixed(1), unit: 'GB peak', sub: 'Device memory total unknown' });
-      cards.gpumem.bar.set(0);
-    }
+    memSub = totalGiB
+      ? `peak ${usedGiB.toFixed(1)}/${totalGiB} GB`
+      : `peak ${usedGiB.toFixed(1)} GB`;
   } else {
-    cards.gpumem.note(state.finished ? 'No memory stats recorded' : 'Reported at run end');
-    cards.gpumem.bar.set(0);
+    memSub = state.finished ? 'no mem stats' : 'mem at run end';
   }
+  if (live && t.gpu_util_pct != null) {
+    cards.gpu.set({ value: String(Math.round(t.gpu_util_pct)), unit: '%', sub: memSub });
+    cards.gpu.bar.set(t.gpu_util_pct / 100);
+  } else {
+    cards.gpu.note(running ? 'Polling RunPod telemetry…' : (state.memory ? memSub : 'Pod not running'));
+    cards.gpu.bar.set(0);
+  }
+}
+
+// ── Model Health verdict card (latest off-pod snapshot diagnostics) ──
+const _BAND_LABEL = { ok: 'OK', warn: 'WARN', error: 'ERROR' };
+
+function fmtHealthMetric(m) {
+  if (m.value == null) return '—';
+  const v = m.value;
+  if (m.unit === 'frac') return `${(v * 100).toFixed(0)}%`;
+  const a = Math.abs(v);
+  const num = a !== 0 && (a < 0.01 || a >= 1000) ? v.toExponential(1) : String(Math.round(v * 100) / 100);
+  return m.unit && m.unit !== 'frac' ? `${num}` : num;
+}
+
+function setVerdictClass(verdict) {
+  const el = cards.health.el;
+  el.classList.toggle('verdict-ok', verdict === 'ok');
+  el.classList.toggle('verdict-warn', verdict === 'warn');
+  el.classList.toggle('verdict-error', verdict === 'error');
+}
+
+function updateHealthCard(state) {
+  if (!cards) return;
+  const d0 = state.diagnostic;
+  if (!d0 || !d0.health) { cards.health.note('No diagnostics yet…'); setVerdictClass(null); return; }
+  const h = d0.health;
+  const ok = h.overall === 'ok';
+  setVerdictClass(h.overall);
+  const offenders = h.headline.filter((m) => m.band === 'bad').concat(h.headline.filter((m) => m.band === 'warn'));
+  const sub = offenders.length
+    ? offenders.slice(0, 2).map((m) => `${m.label} ${fmtHealthMetric(m)}`).join(' · ')
+    : `step ${d0.step} · ${h.counts.good || 0} ok`;
+  cards.health.set({
+    value: _BAND_LABEL[h.overall] || '—',
+    sub,
+    subClass: ok ? 'success' : 'danger',
+    accent: ok ? 'success' : 'danger',
+  });
 }
 
 function noteTelemetry(card, running) {
@@ -322,13 +338,13 @@ function updateKpis(podId) {
 
   updateTelemetryCards(state, pod);
   updateDiagRow(state);
+  updateHealthCard(state);
 
   if (!m) {
     const waitMsg = state.finished ? 'Run finished — no metrics recorded'
       : running ? 'Waiting for first metric…' : 'No metrics recorded for this pod';
     cards.projected.note(waitMsg);
     cards.hero.note(waitMsg);
-    cards.avg.note(waitMsg);
     cards.loss.note(waitMsg);
     updateCostCard(state, pod, null);
     updateRaceBanner(state, null, null, null);
@@ -384,26 +400,7 @@ function updateKpis(podId) {
     cards.hero.note('No baseline selected — pick one below to start the race');
   }
 
-  // 3 — Avg ms/step + live required pace
-  if (ema100 != null) {
-    let targetSub = 'Target needs a baseline';
-    let targetClass = '';
-    if (race.requiredMs != null) {
-      if (race.requiredMs >= 1) {
-        targetSub = `Target: ≤ ${fmtMs(race.requiredMs)} ms`;
-        targetClass = ema100 <= race.requiredMs ? 'success' : 'danger';
-      } else {
-        // Baseline's total time has already elapsed — no pace can beat it.
-        targetSub = 'Past baseline time';
-        targetClass = 'danger';
-      }
-    }
-    cards.avg.set({ value: fmtMs(ema100), unit: 'ms', sub: targetSub, subClass: targetClass });
-  } else {
-    cards.avg.note('Waiting for step timing…');
-  }
-
-  // 4 — Loss (train)
+  // 3 — Loss (train) — pace/target now lives in the race banner + baseline row.
   const lossD = d.deltaVsStepsAgo(state.metricHistory, 'train_loss', m.step, 100);
   if (lossD) {
     cards.loss.set({
@@ -527,7 +524,8 @@ export function initLive() {
     updateBootPanel(podId);
   });
 
-  for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase', 'pod:telemetry']) {
+  // pod:diagnostic = fresh SSE verdict; pod:health = the panel refreshed state.diagnostic from its fetch.
+  for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase', 'pod:telemetry', 'pod:diagnostic', 'pod:health']) {
     on(evt, ({ podId }) => {
       if (app.activePod !== podId) return;
       updateKpis(podId);

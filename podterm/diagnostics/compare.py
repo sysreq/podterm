@@ -55,6 +55,31 @@ def diff(a, b):
     return ('none', 0.0, '') if a == b else ('struct', 0.0, f'{a!r} -> {b!r}')
 
 
+def diff_docs(base, run, threshold=0.0):
+    """Pairwise, JSON-serializable diff of two schema-v2 docs (base vs run). Reuses flatten/diff/
+    flat_meta so the API and the CLI compute movers the same way. -> {movers, structural, status, config}."""
+    lb, sb = flatten(base); lr, sr = flatten(run)
+    movers, structural = [], []
+    for path in sorted(set(lb) | set(lr)):
+        if path not in lb or path not in lr:
+            structural.append({'path': path, 'in_base': path in lb, 'in_run': path in lr}); continue
+        kind, score, text = diff(lb[path], lr[path])
+        if kind == 'none': continue
+        if kind == 'struct': structural.append({'path': path, 'text': text}); continue
+        # 'from ~0' moves score as inf — clamp to keep the response valid JSON (Infinity breaks JSON.parse).
+        if score == float('inf'): score = 1e9
+        if score >= threshold:
+            movers.append({'path': path, 'base': lb[path], 'run': lr[path], 'kind': kind, 'score': score, 'text': text})
+    movers.sort(key=lambda m: -m['score'])
+    status = {n: {'base': sb.get(n, 'absent'), 'run': sr.get(n, 'absent')}
+              for n in sorted(set(sb) | set(sr)) if sb.get(n) != sr.get(n)}
+    mb = flat_meta(dict(config=base.get('meta', {}).get('config', {}), anatomy=base.get('meta', {}).get('anatomy', {})))
+    mr = flat_meta(dict(config=run.get('meta', {}).get('config', {}), anatomy=run.get('meta', {}).get('anatomy', {})))
+    config = {k: {'base': mb.get(k), 'run': mr.get(k)} for k in sorted(set(mb) | set(mr))
+              if json.dumps(mb.get(k), sort_keys=True, default=str) != json.dumps(mr.get(k), sort_keys=True, default=str)}
+    return {'movers': movers, 'structural': structural, 'status': status, 'config': config}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog='python -m podterm.diagnostics.compare', description=__doc__)
     ap.add_argument('files', nargs='+'); ap.add_argument('-t', '--threshold', type=float, default=5.0)

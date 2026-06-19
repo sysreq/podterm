@@ -1,3 +1,4 @@
+import json
 import subprocess
 from dataclasses import dataclass, fields as dc_fields
 from datetime import datetime, timezone
@@ -6,7 +7,7 @@ import torch
 from torch.nn.attention import flex_attention as _flex_mod
 
 import config_gpt as C
-from . import anatomy, config, report
+from . import anatomy, config, health, report
 from .schema import SKIPPED, ERROR
 
 
@@ -59,8 +60,11 @@ class Diagnostics:
                 except Exception as e: rep.emit(report.Section(stage.name, status=ERROR, reason=f'{type(e).__name__}: {e}'))
         finally:
             if was_training: self.model.train()
-            path = self.json_path or cfg.json_path; rep.write(path)
-            print(f'=== END DIAGNOSTICS ===\nwrote {path}')
+            path = self.json_path or cfg.json_path
+            # Single source of truth for the verdict: compute health once, fold it into the doc.
+            doc = rep.to_json(); h = health.compute(doc); doc['status'] = h['overall']; doc['health'] = h
+            with open(path, 'w') as f: json.dump(doc, f, indent=2)
+            print(f"=== END DIAGNOSTICS [{h['overall']}] ===\nwrote {path}")
         return rep
 
 

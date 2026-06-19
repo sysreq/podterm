@@ -10,6 +10,13 @@ PROMPTS = ("What is the meaning of life?", "Write me a haiku about yourself")
 TEMP = 0.8; TOP_K = 50
 
 
+def _rep_ngram(toks, n=4):
+    """Fraction of repeated n-grams (1 - distinct/total) — a cheap degeneration signal. 0 = no repeats."""
+    if len(toks) < n + 1: return 0.0
+    grams = [tuple(toks[i:i + n]) for i in range(len(toks) - n + 1)]
+    return 1.0 - len(set(grams)) / len(grams)
+
+
 class SampleStage(Stage):
     name = 'samples'; requires = ()
 
@@ -34,5 +41,7 @@ class SampleStage(Stage):
             out = x[i, len(ids):int(pos[i])].cpu().tolist()
             if eos in out: out = out[:out.index(eos)]
             text = sp.decode(out)
-            s.row(f'q{i + 1}', f'{prompt!r} -> {text!r}', prompt=prompt, completion=text)
+            cov = len(set(out)) / len(out) if out else 0.0
+            s.row(f'q{i + 1}', f'{prompt!r} -> {text!r}', prompt=prompt, completion=text,
+                  tokens=len(out), vocab_coverage=cov, repetition=_rep_ngram(out))
         ctx.report.emit(s)

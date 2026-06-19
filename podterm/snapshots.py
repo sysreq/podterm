@@ -42,6 +42,7 @@ _PODTERM_ROOT = Path(__file__).resolve().parents[1]  # repo root: holds the impo
 _CACHE_DIR = Path.cwd() / ".cache" / "snapshots"
 _SUBPROCESS_TIMEOUT = float(os.environ.get("DIAG_TIMEOUT", "900"))
 _VAL_SHARD_TIMEOUT = float(os.environ.get("DIAG_VAL_SHARD_TIMEOUT", "600"))
+_BPB_TOL = float(os.environ.get("DIAG_BPB_TOL", "0.02"))  # rel-err for off-pod vs on-pod BPB agreement
 
 # Per-pod serialization + coalescing: a slow diagnostics run must not let snapshots pile up, so
 # while one runs we keep only the newest pending snapshot per pod and process that next.
@@ -152,13 +153,40 @@ def _process(pod_id: str, payload: dict) -> None:
         _ack_final(pod_id, token, step)
 
     diag, status = _run_diagnostics(ckpt, step, variant)
+    _reconcile_bpb(pod_id, step, diag)
 
     db.add_diagnostics(pod_id, step, status, json.dumps(diag))
     hub.send(pod_id, "diagnostic", {
         "step": step, "status": status, "final": bool(payload.get("final")),
+        "health": diag.get("health"),
         "sections": [s.get("name") for s in diag.get("sections", [])],
     })
     log.info("diagnostics done pod=%s step=%s status=%s", pod_id, step, status)
+
+
+def _reconcile_bpb(pod_id: str, step: int, diag: dict) -> None:
+    """Cross-check the off-pod BPB (computed in the subprocess, meta.checks.bpb) against the run's
+    on-pod eval BPB — the only place both numbers coexist (the subprocess can't see podterm's DB).
+    A mismatch means val-shard/tokenizer/seq-len drift, not a model bug. Writes the result back into
+    diag['meta']['checks']['bpb_match'] so it's persisted + visible. Best-effort."""
+    checks = diag.get("meta", {}).get("checks")
+    if not isinstance(checks, dict) or not isinstance(checks.get("bpb"), (int, float)):
+        return
+    try:
+        pod_bpb = db.get_eval_bpb_near(pod_id, step)
+    except Exception:
+        log.exception("bpb reconcile lookup failed pod=%s step=%s", pod_id, step)
+        return
+    off = float(checks["bpb"])
+    if pod_bpb is None:
+        checks["bpb_match"] = {"pod_bpb": None, "off_pod_bpb": off, "match": None}
+        return
+    rel = abs(off - pod_bpb) / max(abs(pod_bpb), 1e-9)
+    checks["bpb_match"] = {"pod_bpb": pod_bpb, "off_pod_bpb": off,
+                          "rel_err": rel, "match": rel <= _BPB_TOL}
+    if rel > _BPB_TOL:
+        log.warning("off-pod BPB %.4f disagrees with pod %.4f (rel %.1f%%) pod=%s step=%s",
+                    off, pod_bpb, rel * 100, pod_id, step)
 
 
 def _ack_final(pod_id: str, token: str, step: int) -> None:
@@ -251,10 +279,13 @@ def _run_diagnostics(ckpt: Path, step: int, variant: str) -> tuple[dict, str]:
         # No parseable output — record the failure (with a tail of stderr) rather than dropping it.
         tail = (proc.stderr or proc.stdout or "")[-2000:]
         return {"step": step, "error": f"{type(e).__name__}: {e}", "stderr": tail, "sections": []}, "error"
-    return diag, _overall_status(diag)
+    # The subprocess writes a value-based verdict (runner.py → health.compute) into diag["status"].
+    # Fall back to execution-only status for older docs that predate the health layer.
+    return diag, diag.get("status") or _overall_status(diag)
 
 
 def _overall_status(diag: dict) -> str:
+    """Execution-only status (fallback): worst of the per-section stage states."""
     states = {s.get("status") for s in diag.get("sections", [])}
     if "error" in states:
         return "error"

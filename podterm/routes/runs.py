@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from podterm import db
+from podterm.diagnostics.compare import diff_docs
 
 router = APIRouter()
 
@@ -32,7 +33,24 @@ async def compare_runs(body: dict):
         return {"error": "Select at least 2 runs"}
     metrics = db.get_metrics_multi(run_ids)
     runs = {rid: db.get_run(rid) for rid in run_ids}
-    return {"metrics": metrics, "runs": runs}
+    return {"metrics": metrics, "runs": runs, "diagnostics": _compare_diagnostics(run_ids)}
+
+
+def _compare_diagnostics(run_ids: list[str]) -> dict:
+    """Per-run latest health verdict + a structured diff of each run's latest snapshot against the
+    first selected run (the baseline). Powers the Compare tab's Model Health Diff."""
+    latest: dict[str, dict | None] = {}
+    for rid in run_ids:
+        hist = db.get_diagnostics(rid)
+        latest[rid] = hist[-1]["diag"] if hist and hist[-1].get("diag") else None
+    health = {rid: (doc.get("health") if doc else None) for rid, doc in latest.items()}
+    base_id = run_ids[0]
+    diff = {}
+    if latest[base_id]:
+        for rid in run_ids[1:]:
+            if latest[rid]:
+                diff[rid] = diff_docs(latest[base_id], latest[rid])
+    return {"base": base_id, "health": health, "diff": diff}
 
 
 @router.get("/api/runs/filters")

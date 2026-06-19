@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from podterm.diagnostics.compare import diff, flat_meta, flatten, load, main, pct
+from podterm.diagnostics.compare import diff, diff_docs, flat_meta, flatten, load, main, pct
 from podterm.diagnostics.schema import SCHEMA_VERSION
 
 
@@ -14,6 +14,25 @@ def doc(rows=None, sections=None, **meta):
         name='flow', status='ok', reason='',
         rows=rows if rows is not None else dict(enc1=dict(attn=0.4, v=[1.0, 2.0])), notes=[])]
     return dict(version=SCHEMA_VERSION, meta=base_meta, sections=secs)
+
+
+def test_diff_docs_movers_status_config():
+    a = doc(rows=dict(enc1=dict(dead=0.01)))
+    b = doc(rows=dict(enc1=dict(dead=0.05)), config=dict(optim=dict(matrix_lr=0.08)))
+    out = diff_docs(a, b)
+    mover = next(m for m in out["movers"] if m["path"].endswith("/dead"))
+    assert mover["base"] == 0.01 and mover["run"] == 0.05 and mover["kind"] == "num"
+    assert out["movers"] == sorted(out["movers"], key=lambda m: -m["score"])  # ranked
+    assert any("matrix_lr" in k for k in out["config"])
+
+
+def test_diff_docs_structural_and_status_change():
+    a = doc(sections=[dict(name="cap", status="ok", reason="", rows=dict(enc1=dict(x=1.0)), notes=[])])
+    b = doc(sections=[dict(name="cap", status="error", reason="boom", rows=dict(enc2=dict(x=1.0)), notes=[])])
+    out = diff_docs(a, b)
+    paths = {s["path"] for s in out["structural"]}
+    assert any("enc1" in p for p in paths) and any("enc2" in p for p in paths)
+    assert out["status"]["cap"]["base"] == "ok" and out["status"]["cap"]["run"].startswith("error")
 
 
 def test_flatten_paths_and_status():

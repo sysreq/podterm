@@ -95,12 +95,20 @@ class EventPipeline:
                 elif t == "model":
                     self.sse.send(pod_id, "info", {"model_params": payload.get("model_params")})
                     db.update_run(pod_id, model_params=payload.get("model_params"))
+                elif t == "config":
+                    info = {k: payload.get(k) for k in ("seed", "seq_len", "batch_tokens", "grad_accum")}
+                    self.sse.send(pod_id, "info", info)
+                    db.update_run(pod_id, seed=payload.get("seed"), seq_len=payload.get("seq_len"),
+                                  batch_tokens=payload.get("batch_tokens"))
                 elif t == "commit":
                     self.sse.send(pod_id, "info", {"commit_hash": payload.get("commit_hash"), "commit_msg": payload.get("commit_msg")})
                     db.update_run(pod_id, commit_hash=payload.get("commit_hash"), commit_msg=payload.get("commit_msg"))
                 elif t == "gpu":
-                    self.sse.send(pod_id, "info", {"gpu_type": payload.get("gpu_type")})
-                    db.update_run(pod_id, gpu_type=payload.get("gpu_type"), gpu_count=payload.get("gpu_count", 1))
+                    self.sse.send(pod_id, "info", {"gpu_type": payload.get("gpu_type"),
+                                                   "driver_version": payload.get("driver_version"),
+                                                   "cuda_version": payload.get("cuda_version")})
+                    db.update_run(pod_id, gpu_type=payload.get("gpu_type"), gpu_count=payload.get("gpu_count", 1),
+                                  driver_version=payload.get("driver_version"), cuda_version=payload.get("cuda_version"))
                 elif t == "phase":
                     phase = str(payload.get("phase", ""))
                     exit_code = payload.get("exit_code")

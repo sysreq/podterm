@@ -27,6 +27,25 @@ function setClusterPill(ok, text) {
   document.getElementById('cluster-pill-text').textContent = text;
 }
 
+function setCachePill(ok, text, title) {
+  const pill = document.getElementById('cache-pill');
+  pill.classList.toggle('down', !ok);
+  pill.title = title || 'Shared torch.compile cache (Redis pod)';
+  document.getElementById('cache-pill-text').textContent = text;
+}
+
+// Compile cache = the shared torch.compile Redis pod (detect_redis_server). Polled independently
+// of /api/pods so neither pill's failure affects the other.
+async function refreshCompileCache() {
+  try {
+    const { address } = await fetch('/api/redis-server').then((r) => r.json());
+    if (address) setCachePill(true, 'Compile Cache', `Compile cache: ${address}`);
+    else setCachePill(false, 'Compile Cache — none', 'No Redis compile-cache pod running');
+  } catch {
+    setCachePill(false, 'Compile Cache — offline', 'Failed to query compile-cache status');
+  }
+}
+
 // ── Tabs ──
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
@@ -139,7 +158,8 @@ function init() {
   initLaunch();
 
   refreshPods();
-  setInterval(refreshPods, 15000);
+  refreshCompileCache();
+  setInterval(() => { refreshPods(); refreshCompileCache(); }, 15000);
 }
 
 init();

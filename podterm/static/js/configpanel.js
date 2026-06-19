@@ -77,21 +77,32 @@ export function renderConfigPanel(podId) {
     ? row('GPU', gpuCount > 1 ? `${gpu} ×${gpuCount}` : gpu)
     : row('GPU', 'Awaiting device query', { pending: true }));
 
+  const driver = state.info.driver_version || run.driver_version || null;
+  const cuda = state.info.cuda_version || run.cuda_version || null;
+  rowsEl.appendChild(driver
+    ? row('Driver version', driver)
+    : row('Driver version', 'Awaiting device query', { pending: true }));
+  rowsEl.appendChild(cuda
+    ? row('CUDA version', cuda)
+    : row('CUDA version', 'Awaiting device query', { pending: true }));
+
   rowsEl.appendChild(pod.imageName
     ? row('Docker image', pod.imageName, { copy: pod.imageName })
     : row('Docker image', 'Not recorded for stopped pods', { pending: true }));
 
-  rowsEl.appendChild(row('Config hash', 'Not computed at launch', { pending: true }));
-
-  rowsEl.appendChild(cfg.seed != null
-    ? row('Seed', String(cfg.seed))
-    : row('Seed', 'Not in launch config', { pending: true }));
-  rowsEl.appendChild(cfg.seq_len != null
-    ? row('Sequence length', String(cfg.seq_len))
-    : row('Sequence length', 'Not in launch config', { pending: true }));
-  rowsEl.appendChild(cfg.batch_size != null
-    ? row('Batch size', String(cfg.batch_size))
-    : row('Batch size', 'Not in launch config', { pending: true }));
+  // Run config emitted by the pod at training start (config event), persisted on the run row.
+  const seed = state.info.seed ?? run.seed ?? cfg.seed ?? null;
+  const seqLen = state.info.seq_len ?? run.seq_len ?? cfg.seq_len ?? null;
+  const batchTokens = state.info.batch_tokens ?? run.batch_tokens ?? null;
+  rowsEl.appendChild(seed != null
+    ? row('Seed', String(seed))
+    : row('Seed', 'Awaiting boot info', { pending: true }));
+  rowsEl.appendChild(seqLen != null
+    ? row('Sequence length', String(seqLen))
+    : row('Sequence length', 'Awaiting boot info', { pending: true }));
+  rowsEl.appendChild(batchTokens != null
+    ? row('Batch size', `${Number(batchTokens).toLocaleString('en-US')} tok/step`)
+    : row('Batch size', 'Awaiting boot info', { pending: true }));
 
   // Real metadata the pipeline does record — keeps the panel useful today.
   if (run.data_variant || cfg.data_variant) rowsEl.appendChild(row('Data variant', run.data_variant || cfg.data_variant));

@@ -31,10 +31,24 @@ class ForwardStage(Stage):
                     hsi=torch.zeros(max(b.heads, 1), max(b.heads, 1), **f64),
                     up=torch.zeros(max(b.act_out, 1), **f64)) for b in blocks]
         sat = torch.zeros((), **f64); lct = 0; ploss = torch.zeros(sl, **f64); tt = 0.0; nb = 0
+        # BPB reconciliation: replicate train_gpt.eval_val's exact byte accounting (SentencePiece LUTs
+        # + leading-space adjustment) so the off-pod number is directly comparable to the on-pod BPB.
+        loss_sum = torch.zeros((), **f64); byte_count = torch.zeros((), **f64)
+        try:
+            import train_gpt as _tg
+            _bb, _hls, _ibt = (t.to(dev) for t in _tg.build_sentencepiece_luts())
+        except Exception:
+            _bb = None
 
         with CaptureSession(anat) as sess, torch.no_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             for x, y in val_batches(ctx.val_tokens, ctx.cfg.max_batches):
                 loss, cap = sess.forward(model, x, y); tt += x.numel(); nb += 1
+                loss_sum += loss.double() * y.numel()
+                if _bb is not None:
+                    prev_ids, tgt_ids = x.reshape(-1), y.reshape(-1)
+                    tb = _bb[tgt_ids].to(torch.int16)
+                    tb += (_hls[tgt_ids] & ~_ibt[prev_ids]).to(torch.int16)
+                    byte_count += tb.to(torch.float64).sum()
                 h_in = cap['block_in']; rr[0] += h_in.float().norm(dim=-1).sum()
                 for i, b in enumerate(blocks):
                     m = b.module; a = acc[i]; h_out = cap[b.name]
@@ -71,6 +85,11 @@ class ForwardStage(Stage):
         ctx.report.meta['checks'] = dict(
             loss_recompute='ok' if okC else f'diff={errC.item():.1e}',
             recompose={b.name: ('ok' if okA[i] else f'rel_err={errA[i].item():.1e}') for i, b in enumerate(blocks) if can_branch[i]})
+        # BPB = mean_nats/ln2 · (tokens/bytes) = loss_sum_nats / (ln2 · bytes). Only meaningful over the
+        # full val set (matches on-pod); flag whether this run was capped so reconciliation can judge.
+        if _bb is not None and byte_count.item() > 0:
+            ctx.report.meta['checks']['bpb'] = (loss_sum / (math.log(2.0) * byte_count)).item()
+            ctx.report.meta['checks']['bpb_full'] = (ctx.cfg.max_batches == 0)
         failA = [f'{b.name} recompose rel_err={errA[i].item():.1e} -- block forward diverges from _qkv/branch recompute'
                  for i, b in enumerate(blocks) if can_branch[i] and not okA[i]]
         failC = [] if okC else [f'loss recompute diff={errC.item():.1e} -- softcap/CE path diverges from model loss']
@@ -207,10 +226,15 @@ class GradStage(Stage):
         with warnings.catch_warnings(), torch.enable_grad(), torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             warnings.filterwarnings('ignore', message='flex_attention called without')
             model(x, y).backward()
+        allg = []
         for b in ctx.anatomy.blocks:
             parts = []; data = {}
             for n, m in b.init_std:
                 if getattr(m, 'weight', None) is None or m.weight.grad is None: continue
-                g = m.weight.grad.float().norm().item(); parts.append(f'{n}={g:.4f}'); data[n] = g
+                g = m.weight.grad.float().norm().item(); parts.append(f'{n}={g:.4f}'); data[n] = g; allg.append(g)
             s.row(b.name, ' '.join(parts), **data)
+        # Cross-module spread: max/min ratio flags vanishing (tiny somewhere) or exploding (huge somewhere).
+        if allg:
+            gmax, gmin = max(allg), min(allg); ratio = gmax / max(gmin, 1e-12)
+            s.row('summary', f'max={gmax:.4f} min={gmin:.4f} ratio={ratio:.1f}', max=gmax, min=gmin, ratio=ratio)
         model.zero_grad(); ctx.report.emit(s)

@@ -32,12 +32,13 @@ function freshState() {
     evals: [],         // {step, val_bpb, val_loss}
     evalSteps: new Set(),
     logLines: [],      // {text, level, step|null}
-    info: {},          // gpu_type, gpu_count, commit_hash, commit_msg, model_params
+    info: {},          // gpu_type, gpu_count, driver_version, cuda_version, seed, seq_len, batch_tokens, commit_hash, commit_msg, model_params
     memory: null,      // {peak_mib, reserved_mib}
     telemetry: null,   // {cpu_pct, mem_pct, gpu_util_pct, gpu_mem_pct, uptime_s}
     telemetryHistory: [], // recent gpu_util_pct samples
     boot: null,        // {stage, image, message, layers, total, complete, pct, done}
     summary: null,     // {final_val_bpb, best_val_bpb, final_val_loss}
+    diagnostic: null,  // latest off-pod health: {step, status, health} (from SSE or the panel's fetch)
     phase: null,
     finished: false,
     exitCode: null,
@@ -188,8 +189,11 @@ export function ensurePodStream(podId) {
   });
 
   es.addEventListener('diagnostic', (e) => {
-    // Off-pod model-health result for one snapshot; the panel refetches the full series.
-    emit('pod:diagnostic', { podId, diag: JSON.parse(e.data) });
+    // Off-pod model-health result for one snapshot. Stash the verdict for the live card; the panel
+    // refetches the full series for its drill-down.
+    const d = JSON.parse(e.data);
+    state.diagnostic = { step: d.step, status: d.status, health: d.health || null };
+    emit('pod:diagnostic', { podId, diag: d });
   });
 
   es.addEventListener('phase', (e) => {
