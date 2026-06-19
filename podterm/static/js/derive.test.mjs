@@ -4,8 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ema, etaMs, costSoFar, projectedTotalCost, elapsedWallMs,
-  baselineAtStep, paceDelta, requiredPaceMs, projectedFinishMarginMs,
-  raceStatus, deltaVsStepsAgo, evalDelta, parseGpuMemGiB,
+  baselineAtStep, throughputTps, baselineTimeAtLoss, lossDescentRatePerMs,
+  timeToReachLoss, qualityRace, deltaVsStepsAgo, evalDelta, parseGpuMemGiB,
 } from './derive.js';
 
 // ── The three spec sanity cases ──
@@ -19,10 +19,7 @@ test('spec: $3.29/hr with ~10 min elapsed -> cost ~$0.55', () => {
   assert.ok(Math.abs(c - 0.548) < 0.005, `got $${c}`);
 });
 
-test('spec: 192.6 ms vs required 199.9 ms over 16,883 steps -> margin ~123 s', () => {
-  const m = projectedFinishMarginMs(199.9, 192.6, 16883);
-  assert.ok(Math.abs(m / 1000 - 123.2) < 0.5, `got ${m / 1000} s`);
-});
+
 
 // ── ema ──
 test('ema: empty/null input -> null', () => {
@@ -61,58 +58,98 @@ test('baselineAtStep: past the last sample -> last sample', () => {
   assert.equal(baselineAtStep(byStep, steps, 99999).v, 'c');
 });
 
-// ── paceDelta ──
-test('paceDelta: negative deltas mean ahead', () => {
-  const p = paceDelta(
-    { step_avg_ms: 192.6, train_time_ms: 600_000 },
-    { step_avg_ms: 200.0, train_time_ms: 600_200 },
-  );
-  assert.ok(Math.abs(p.perStepMs - -7.4) < 1e-9);
-  assert.equal(p.cumulativeMs, -200);
+// ── throughputTps ──
+test('throughputTps: tokens per second from step time + token budget', () => {
+  // 524288 tokens/step at 200 ms/step -> ~2.62M tok/s
+  assert.ok(Math.abs(throughputTps(200, 524288) - 2_621_440) < 1);
+  assert.equal(throughputTps(200, null), null);
+  assert.equal(throughputTps(0, 524288), null);
 });
 
-test('paceDelta: missing fields -> null', () => {
-  assert.equal(paceDelta({ step_avg_ms: 192 }, { step_avg_ms: 200 }), null);
-  assert.equal(paceDelta(null, {}), null);
+// ── baselineTimeAtLoss ──
+// Baseline: loss falls 4.0 -> 3.0 -> 2.5 at 50s, 100s, 150s.
+const blSamples = [
+  { step: 250, train_loss: 4.0, train_time_ms: 50_000 },
+  { step: 500, train_loss: 3.0, train_time_ms: 100_000 },
+  { step: 750, train_loss: 2.5, train_time_ms: 150_000 },
+];
+
+test('baselineTimeAtLoss: interpolates time at a loss between samples', () => {
+  // loss 3.5 sits halfway between 4.0 and 3.0 -> halfway in time (75s)
+  assert.equal(baselineTimeAtLoss(blSamples, 3.5), 75_000);
+  // exact sample hit
+  assert.equal(baselineTimeAtLoss(blSamples, 3.0), 100_000);
 });
 
-// ── requiredPaceMs ──
-test('requiredPaceMs: basic and zero-remaining guard', () => {
-  // Baseline finished in 60s; we are 30s in with 150 steps left -> 200 ms/step.
-  assert.equal(requiredPaceMs(60_000, 30_000, 150), 200);
-  assert.equal(requiredPaceMs(60_000, 30_000, 0), null);
+test('baselineTimeAtLoss: never reached -> null; already below at first -> first time', () => {
+  assert.equal(baselineTimeAtLoss(blSamples, 2.0), null);
+  assert.equal(baselineTimeAtLoss(blSamples, 5.0), 50_000);
 });
 
-// ── raceStatus ──
-const baselineSamples = {
-  250: { step: 250, step_avg_ms: 200, train_time_ms: 50_000 },
-  500: { step: 500, step_avg_ms: 200, train_time_ms: 100_000 },
-};
+// ── lossDescentRatePerMs / timeToReachLoss ──
+test('lossDescentRatePerMs: recent loss drop per ms (positive when descending)', () => {
+  const hist = [
+    { step: 0, train_loss: 4.0, train_time_ms: 0 },
+    { step: 500, train_loss: 3.0, train_time_ms: 100_000 },
+  ];
+  // (4.0 - 3.0) / 100000 ms = 1e-5 loss/ms
+  assert.ok(Math.abs(lossDescentRatePerMs(hist, 500) - 1e-5) < 1e-12);
+  assert.equal(lossDescentRatePerMs([{ step: 0, train_loss: 4, train_time_ms: 0 }], 500), null);
+});
 
-test('raceStatus: ahead when cumulative time is lower', () => {
-  const r = raceStatus({
-    metric: { step: 500, total_steps: 1000, step_avg_ms: 192.6, train_time_ms: 96_300 },
-    baselineByStep: baselineSamples,
-    baselineSteps: [250, 500],
-    baselineTotalTimeMs: 200_000,
-    emaMs: 192.6,
+test('timeToReachLoss: projects forward, guards non-convergence', () => {
+  // at loss 3.0, time 100s, target 2.5, rate 1e-5 -> +50s -> 150s
+  assert.equal(timeToReachLoss(3.0, 100_000, 2.5, 1e-5), 150_000);
+  assert.equal(timeToReachLoss(2.4, 100_000, 2.5, 1e-5), 100_000); // already past target
+  assert.equal(timeToReachLoss(3.0, 100_000, 2.5, 0), null);       // flat -> null
+});
+
+// ── qualityRace ──
+const myHistory = [
+  { step: 0, train_loss: 4.0, train_time_ms: 0, step_avg_ms: 180 },
+  { step: 500, train_loss: 3.5, train_time_ms: 45_000, step_avg_ms: 180 },
+];
+
+test('qualityRace: ahead when reaching the loss faster than baseline', () => {
+  // I am at loss 3.5 at 45s; baseline hit 3.5 at 75s -> ahead by 30s.
+  const r = qualityRace({
+    metric: myHistory[1],
+    history: myHistory,
+    baselineSamples: blSamples,
+    baselineTotalTimeMs: 150_000,
+    batchTokens: 524288,
+    emaMsPerStep: 180,
+    baselineSample: { step_avg_ms: 200 },
   });
   assert.equal(r.state, 'ahead');
-  assert.equal(r.cumulativeMs, -3700);
-  assert.ok(Math.abs(r.perStepMs - -7.4) < 1e-9);
-  // required = (200000 - 96300) / 500 = 207.4; margin = (207.4 - 192.6) * 500
-  assert.ok(Math.abs(r.requiredMs - 207.4) < 1e-9);
-  assert.ok(Math.abs(r.projectedMarginMs - 7400) < 1e-6);
+  assert.ok(r.leadMs > 0, `leadMs ${r.leadMs}`);
+  assert.equal(r.targetLoss, 2.5);
+  assert.ok(r.throughputTps > 0);
+  assert.ok(Math.abs(r.msPerStep - 180) < 1e-9);
+  assert.equal(r.baselineMsPerStep, 200);
 });
 
-test('raceStatus: no baseline -> no-baseline state, no numbers', () => {
-  const r = raceStatus({ metric: { step: 1 }, baselineSteps: [], baselineByStep: {} });
+test('qualityRace: no baseline -> no-baseline but still reports throughput', () => {
+  const r = qualityRace({
+    metric: myHistory[1], history: myHistory, baselineSamples: [],
+    batchTokens: 524288, emaMsPerStep: 180,
+  });
   assert.equal(r.state, 'no-baseline');
-  assert.equal(r.cumulativeMs, null);
+  assert.equal(r.leadMs, null);
+  assert.ok(r.throughputTps > 0);
 });
 
-test('raceStatus: no metric -> no-data', () => {
-  assert.equal(raceStatus({ metric: null }).state, 'no-data');
+test('qualityRace: null batchTokens -> ms/step only, no tps', () => {
+  const r = qualityRace({
+    metric: myHistory[1], history: myHistory, baselineSamples: blSamples,
+    baselineTotalTimeMs: 150_000, batchTokens: null, emaMsPerStep: 180,
+  });
+  assert.equal(r.throughputTps, null);
+  assert.ok(Math.abs(r.msPerStep - 180) < 1e-9);
+});
+
+test('qualityRace: no metric -> no-data', () => {
+  assert.equal(qualityRace({ metric: null }).state, 'no-data');
 });
 
 // ── deltaVsStepsAgo ──

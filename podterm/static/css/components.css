@@ -107,7 +107,7 @@
   .kpi-card:not(.diag) .kpi-sub { font-size: 10px; }
   .kpi-caption { font-size: 9px; letter-spacing: 0.6px; }
 }
-#charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3);
+#charts-row { display: grid; grid-template-columns: 1fr; gap: var(--sp-3);
               height: var(--h-chart); flex-shrink: 0; }
 #charts-row .chart-box { background: var(--bg-panel); border: 1px solid var(--border);
                          border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3);
@@ -115,9 +115,6 @@
 .chart-header { display: flex; align-items: center; justify-content: space-between;
                 gap: var(--sp-2); margin-bottom: 2px; flex-shrink: 0; }
 .chart-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-secondary); }
-.chip-pending { font-size: 9px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
-                color: var(--text-muted); border: 1px dashed var(--border-strong);
-                border-radius: var(--r-pill); padding: 2px 8px; white-space: nowrap; }
 .chart-plot { flex: 1; min-height: 0; }
 /* Bottom row: logs + config */
 #bottom-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
