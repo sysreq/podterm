@@ -1,0 +1,22 @@
+/* Keep a concrete height: Plotly reads the container's clientHeight at init and
+   on resize, so a collapsed (auto/0) height renders a zero-height chart. The
+   min-height floors the height-token media queries. */
+#charts-row { display: grid; grid-template-columns: 1fr; gap: var(--sp-3);
+              height: var(--h-chart); min-height: 200px; flex-shrink: 0; }
+#charts-row .chart-box { background: var(--bg-panel); border: 1px solid var(--border);
+                         border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3);
+                         display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.chart-header { display: flex; align-items: center; justify-content: space-between;
+                gap: var(--sp-2); margin-bottom: 2px; flex-shrink: 0; }
+.chart-title { font-size: var(--fs-md); font-weight: 600; color: var(--text-secondary); }
+.chart-plot { flex: 1; min-height: 0; }
+/* Bottom row: logs + config */
+#bottom-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+              gap: var(--sp-3); height: var(--h-bottom); flex-shrink: 0; }
+#logs-panel, #config-panel { background: var(--bg-panel); border: 1px solid var(--border);
+                             border-radius: var(--r-md); display: flex; flex-direction: column;
+                             overflow: hidden; position: relative; min-width: 0; }
+.panel-header { display: flex; align-items: center; gap: var(--sp-3);
+                padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border);
+                flex-shrink: 0; min-height: 40px; }
+

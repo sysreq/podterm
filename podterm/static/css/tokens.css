@@ -77,11 +77,34 @@
   --h-chart: 300px;
   --h-diag: 136px;
   --h-bottom: 292px;
+
+  /* Adaptive grid card minimums for auto-fit. Real card counts: 6 KPI, 2 diag.
+     Wider screens use smaller mins (denser rows); narrower bumps the min so cards
+     wrap to fewer, more readable columns instead of compressing every card. */
+  --kpi-card-min: 150px;
+  --diag-card-min: 240px;
 }
 
+/* Width ranges: shrink type and raise the per-card minimum as the window narrows. */
 @media (max-width: 1600px) {
   :root {
     --fs-kpi: 21px;
     --fs-hero: 25px;
+    --kpi-card-min: 160px;
   }
+}
+@media (max-width: 1280px) {
+  :root { --kpi-card-min: 170px; }
+}
+@media (max-width: 1024px) {
+  :root { --kpi-card-min: 210px; }
+}
+
+/* Height ranges: reclaim vertical space for the chart/bottom regions on shorter
+   viewports so KPI/banner content stays on screen before the page has to scroll. */
+@media (max-height: 900px) {
+  :root { --h-chart: 240px; --h-bottom: 240px; }
+}
+@media (max-height: 760px) {
+  :root { --h-chart: 210px; --h-bottom: 210px; }
 }

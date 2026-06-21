@@ -114,6 +114,19 @@ def test_headline_order_stable():
     assert ids == [e["id"] for e in health.HEADLINE]
 
 
+def test_headline_carries_thresholds_and_why():
+    # The UI renders threshold hints + rationale from these without hardcoding numbers.
+    for h in health.compute(_full_doc())["headline"]:
+        assert "thresholds" in h and isinstance(h["thresholds"], dict) and "kind" in h["thresholds"], h
+        assert "why" in h and isinstance(h["why"], str) and h["why"], h
+    # info-kind metrics still carry a thresholds dict of kind 'info'.
+    by_id = {h["id"]: h for h in health.compute(_full_doc())["headline"]}
+    assert by_id["mean_loss"]["thresholds"]["kind"] == "info"
+    # serialized thresholds must not alias the registry band dict (callers may mutate).
+    by_entry = {e["id"]: e for e in health.HEADLINE}
+    assert by_id["dead_neurons"]["thresholds"] is not by_entry["dead_neurons"]["band"]
+
+
 def test_compute_does_not_mutate_input():
     doc = _full_doc()
     before = copy.deepcopy(doc)

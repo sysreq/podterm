@@ -16,6 +16,7 @@
   <div id="brand"><span class="brand-dot"></span>PODTERM</div>
   <nav id="tab-bar">
     <div class="tab active" data-tab="live">Live</div>
+    <div class="tab" data-tab="health">Model Health</div>
     <div class="tab" data-tab="history">History</div>
     <div class="tab" data-tab="compare">Compare</div>
     <div class="tab" data-tab="machines">Machines</div>
@@ -71,8 +72,9 @@
         <div class="race-progress">
           <div class="race-bar">
             <div class="race-bar-fill"></div>
-            <div class="race-marker projected" title="Projected finish"></div>
-            <div class="race-marker baseline" title="Baseline total time"></div>
+            <div class="race-marker projected" title="Your budget finish"></div>
+            <div class="race-marker baseline" title="Baseline budget finish"></div>
+            <div class="race-marker win" title="Projected win time"></div>
           </div>
           <div class="race-bar-labels">
             <span id="race-label-projected"></span>
@@ -95,13 +97,6 @@
         </div>
       </div>
       <div id="diag-row"></div>
-      <div id="diagnostics-panel" class="panel" hidden>
-        <div class="panel-header">
-          <span class="chart-title">Model Health</span>
-          <span id="diag-sub" class="diag-sub"></span>
-        </div>
-        <div id="diag-content"></div>
-      </div>
       <div id="bottom-row">
         <div id="logs-panel">
           <div class="panel-header">
@@ -125,6 +120,11 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Model Health Tab -->
+  <div id="tab-health" class="tab-content">
+    <div id="health-root"></div>
   </div>
 
   <!-- History Tab -->

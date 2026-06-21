@@ -18,31 +18,40 @@ suite runs on a bare checkpoint with optimizer=None (__main__.py), so that stage
 HEADLINE = [
     dict(id='dead_neurons', label='Dead neurons', unit='frac', group='capacity', tier=1,
          section='capacity: dead neurons', row='global', key='dead', reduce='value',
-         band=dict(kind='hi', warn=0.05, bad=0.20)),
+         band=dict(kind='hi', warn=0.05, bad=0.20),
+         why='Units that never activate waste capacity; a large fraction means dead width.'),
     dict(id='head_redundancy', label='Head redundancy', unit='cos', group='capacity', tier=1,
          section='capacity: head output redundancy', row=None, key='max', reduce='max',
-         band=dict(kind='hi', warn=0.6, bad=0.85)),
+         band=dict(kind='hi', warn=0.6, bad=0.85),
+         why='Attention heads computing near-identical outputs are redundant capacity.'),
     dict(id='attn_entropy_min', label='Attn entropy (min)', unit='bits', group='capacity', tier=1,
          section='capacity: attention entropy (bits)', row=None, key='entropy', reduce='min',
-         band=dict(kind='lo', warn=0.5, bad=0.1)),
+         band=dict(kind='lo', warn=0.5, bad=0.1),
+         why='Near-zero entropy means a head collapsed onto a single position.'),
     dict(id='logit_saturation', label='Logit saturation', unit='frac', group='flow', tier=1,
          section='flow: logit saturation', row='logits', key='sat', reduce='value',
-         band=dict(kind='hi', warn=0.10, bad=0.30)),
+         band=dict(kind='hi', warn=0.10, bad=0.30),
+         why='Saturated logits choke gradients and signal overconfidence.'),
     dict(id='residual_growth', label='Residual growth', unit='x', group='flow', tier=1,
          section='flow: residual norm', row='stream', key='final', reduce='value',
-         band=dict(kind='range', warn_lo=0.5, warn_hi=4.0, bad_lo=0.2, bad_hi=10.0)),
+         band=dict(kind='range', warn_lo=0.5, warn_hi=4.0, bad_lo=0.2, bad_hi=10.0),
+         why='Residual stream norm should grow moderately; too flat or exploding is unhealthy.'),
     dict(id='grad_ratio', label='Grad norm ratio', unit='x', group='grad', tier=1,
          section='gradients', row='summary', key='ratio', reduce='value',
-         band=dict(kind='hi', warn=1e3, bad=1e5)),
+         band=dict(kind='hi', warn=1e3, bad=1e5),
+         why='A large max/min grad-norm ratio across layers signals imbalance or instability.'),
     dict(id='escape_min', label='Zero-init escape (min)', unit='x', group='arch', tier=1,
          section='zero-init escape', row=None, key=None, reduce='min',
-         band=dict(kind='lo', warn=1.5, bad=None)),
+         band=dict(kind='lo', warn=1.5, bad=None),
+         why='Zero-init branches must escape their init; staying near 1x means a dead branch.'),
     dict(id='mean_loss', label='Mean loss', unit='nats', group='flow', tier=2,
          section='flow: per-position loss', row='loss', key='per_pos', reduce='mean',
-         band=dict(kind='info')),
+         band=dict(kind='info'),
+         why='Per-position mean loss — trend reference only, no verdict.'),
     dict(id='eff_rank', label='Embed eff_rank', unit='dims', group='arch', tier=2,
          section='embedding spectrum', row=None, key='eff_rank', reduce='mean',
-         band=dict(kind='info')),
+         band=dict(kind='info'),
+         why='Embedding effective rank — trend reference only, no verdict.'),
 ]
 
 # Severity lattice shared by section-execution status and metric bands. overall = worst of all.
@@ -149,6 +158,7 @@ def compute(diag):
         counts[band] += 1
         sev = max(sev, _SEV.get(band, 0))
         headline.append(dict(id=entry['id'], label=entry['label'], value=value,
-                             unit=entry['unit'], band=band, group=entry['group'], tier=entry['tier']))
+                             unit=entry['unit'], band=band, group=entry['group'], tier=entry['tier'],
+                             thresholds=dict(entry['band']), why=entry.get('why')))
 
     return dict(overall=_VERDICT[sev], headline=headline, counts=counts)

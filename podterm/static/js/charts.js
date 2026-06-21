@@ -1,6 +1,7 @@
 // Shared Plotly configuration + the Live Training Loss chart. Traces are
 // created once at init with fixed indices and updated via restyle — no
 // index juggling. (Throughput now lives in the race banner readout.)
+import { observePlotlyResize } from './resize.js';
 
 export const COLORS = ['#ffd166', '#ff6b6b', '#48dbfb', '#81ecec', '#a29bfe', '#fd79a8'];
 
@@ -69,6 +70,7 @@ export function initLiveCharts() {
     ...plotLayout, height: lossEl.clientHeight || 280,
     yaxis: { ...lossYAxis }, legend: liveLegend, hovermode: 'x unified',
   }, plotConfig);
+  observePlotlyResize(lossEl);
 }
 
 export function chartsReady() {

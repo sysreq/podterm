@@ -64,7 +64,7 @@ export function initLive() {
     if (document.getElementById('live-view').classList.contains('booting')) syncLiveView(podId);
   });
 
-  for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase', 'pod:telemetry', 'pod:diagnostic', 'pod:health']) {
+  for (const evt of ['pod:memory', 'pod:info', 'pod:summary', 'pod:phase', 'pod:telemetry', 'pod:diagnostic', 'pod:health', 'pod:snapshot']) {
     on(evt, ({ podId }) => {
       if (!syncLiveView(podId)) return;
       updateKpis(podId);

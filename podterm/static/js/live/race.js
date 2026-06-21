@@ -1,4 +1,4 @@
-import { fmtDelta, fmtDuration, fmtInt, fmtMs, fmtSecShort, fmtTps } from '../format.js';
+import { fmtDelta, fmtDuration, fmtInt, fmtMs, fmtTps } from '../format.js';
 
 // Throughput readout shared by the banner sub-line and the hero card.
 // "523k tok/s · 192.6 ms/step (+4.1 vs base)" — falls back to ms/step when no token budget.
@@ -14,6 +14,8 @@ function fmtThroughput(race) {
 }
 
 // ── Race banner + baseline row (numbers shared with the KPI cards by construction) ──
+// The race compares estimated finish loss at each run's configured max-wallclock
+// budget (lower wins). A behind run also gets a "time to win" estimate.
 export function updateRaceBanner(state, m, race, eta) {
   const banner = document.getElementById('race-banner');
   const headline = document.getElementById('race-headline');
@@ -21,12 +23,14 @@ export function updateRaceBanner(state, m, race, eta) {
   const fill = banner.querySelector('.race-bar-fill');
   const markP = banner.querySelector('.race-marker.projected');
   const markB = banner.querySelector('.race-marker.baseline');
+  const markW = banner.querySelector('.race-marker.win');
   const labP = document.getElementById('race-label-projected');
   const labB = document.getElementById('race-label-baseline');
 
-  banner.classList.remove('ahead', 'behind');
+  banner.classList.remove('ahead', 'behind', 'tied');
   markP.style.display = 'none';
   markB.style.display = 'none';
+  if (markW) markW.style.display = 'none';
   labP.textContent = '';
   labB.textContent = '';
 
@@ -41,10 +45,16 @@ export function updateRaceBanner(state, m, race, eta) {
 
   const stepFrac = m.total_steps ? m.step / m.total_steps : 0;
   const throughput = race ? fmtThroughput(race) : '';
+  const racing = race && (race.state === 'ahead' || race.state === 'behind' || race.state === 'tied');
 
-  if (!race || (race.state !== 'ahead' && race.state !== 'behind')) {
-    headline.textContent = 'No baseline selected';
-    sub.textContent = throughput || 'Choose a baseline below to start the race';
+  if (!racing) {
+    if (race && race.state === 'unknown') {
+      headline.textContent = 'Waiting for enough loss trend';
+      sub.textContent = throughput || 'Projecting the finish once the loss trend settles';
+    } else {
+      headline.textContent = 'No baseline selected';
+      sub.textContent = throughput || 'Choose a baseline below to start the race';
+    }
     fill.style.width = `${(stepFrac * 100).toFixed(1)}%`;
     if (eta != null && m.train_time_ms != null) {
       labP.textContent = `Projected total ${fmtDuration(m.train_time_ms + eta)}`;
@@ -53,40 +63,58 @@ export function updateRaceBanner(state, m, race, eta) {
   }
 
   const ahead = race.state === 'ahead';
-  banner.classList.add(ahead ? 'ahead' : 'behind');
-  const lossTxt = race.currentLoss != null ? race.currentLoss.toFixed(3) : '?';
-  headline.textContent = `You're ${ahead ? 'ahead of' : 'behind'} baseline by ${fmtSecShort(race.leadMs)} at ${lossTxt} loss`;
+  const tied = race.state === 'tied';
+  banner.classList.add(tied ? 'tied' : (ahead ? 'ahead' : 'behind'));
+  const marginTxt = race.finishMarginLoss != null ? Math.abs(race.finishMarginLoss).toFixed(4) : '?';
+  headline.textContent = tied
+    ? 'Too close to call at the budget finish'
+    : ahead ? `Projected to beat baseline by ${marginTxt} loss`
+            : `Projected behind baseline by ${marginTxt} loss`;
 
   const subParts = [];
   if (throughput) subParts.push(throughput);
+  if (race.currentFinishLoss != null && race.baselineFinishLoss != null) {
+    subParts.push(`finish ${race.currentFinishLoss.toFixed(3)} vs baseline ${race.baselineFinishLoss.toFixed(3)}`);
+  }
   if (state.finished) {
-    subParts.push(`final margin at step ${fmtInt(m.step)}`);
-  } else if (race.projectedMarginMs != null && race.targetLoss != null) {
-    // Projected margin reaching the baseline's final loss — distinct from the current lead.
-    const pm = race.projectedMarginMs;
-    subParts.push(`projected to reach ${race.targetLoss.toFixed(3)} ~${fmtSecShort(pm)} ${pm >= 0 ? 'ahead' : 'behind'}`);
+    subParts.push(`final at step ${fmtInt(m.step)}`);
+  } else if (!ahead && !tied) {
+    // Behind: how much total training before the loss curve crosses the baseline finish.
+    if (race.estimatedWinTimeMs != null) {
+      const beyond = race.extraTimeToWinMs != null ? ` (+${fmtDuration(race.extraTimeToWinMs)} beyond budget)` : '';
+      subParts.push(`needs ~${fmtDuration(race.estimatedWinTimeMs)} total training${beyond} to win`);
+    } else {
+      subParts.push('win not currently projected');
+    }
+  } else if (ahead && race.finishBudgetMs != null) {
+    subParts.push(`wins by budget finish at ${fmtDuration(race.finishBudgetMs)}`);
   }
   sub.textContent = subParts.join(' · ');
 
-  // Progress bar on the time-to-target domain: where elapsed sits between
-  // [0, max(my projected target time, baseline's target time)].
-  const projTarget = race.projectedTargetTimeMs;
-  const baseTotal = state.baselineTotalTimeMs;
-  const domain = Math.max(projTarget ?? 0, baseTotal ?? 0, m.train_time_ms ?? 0);
+  // Progress bar on the time axis: elapsed within [0, the latest of the budgets,
+  // a beyond-budget win time, and elapsed].
+  const budget = race.finishBudgetMs;
+  const baseBudget = race.baselineFinishBudgetMs;
+  const winT = race.extraTimeToWinMs != null ? race.estimatedWinTimeMs : null; // only render when past budget
+  const domain = Math.max(budget ?? 0, baseBudget ?? 0, winT ?? 0, m.train_time_ms ?? 0);
   if (domain > 0) {
     fill.style.width = `${Math.min(100, ((m.train_time_ms ?? 0) / domain) * 100).toFixed(1)}%`;
-    if (projTarget != null) {
-      markP.style.left = `${((projTarget / domain) * 100).toFixed(2)}%`;
+    if (budget != null) {
+      markP.style.left = `${((budget / domain) * 100).toFixed(2)}%`;
       markP.style.display = 'block';
     }
-    if (baseTotal != null) {
-      markB.style.left = `${((baseTotal / domain) * 100).toFixed(2)}%`;
+    if (baseBudget != null) {
+      markB.style.left = `${((baseBudget / domain) * 100).toFixed(2)}%`;
       markB.style.display = 'block';
     }
-    // Keep the under-bar labels in the same left-to-right order as the markers.
-    const projText = projTarget != null ? `Projected ${fmtDuration(projTarget)}` : '';
-    const baseText = baseTotal != null ? `Baseline ${fmtDuration(baseTotal)}` : '';
-    const projFirst = projTarget == null || baseTotal == null || projTarget <= baseTotal;
+    if (markW && winT != null) {
+      markW.style.left = `${Math.min(100, (winT / domain) * 100).toFixed(2)}%`;
+      markW.style.display = 'block';
+    }
+    // Keep the under-bar labels in the same left-to-right order as the budget markers.
+    const projText = budget != null ? `Budget ${fmtDuration(budget)}` : '';
+    const baseText = baseBudget != null ? `Baseline ${fmtDuration(baseBudget)}` : '';
+    const projFirst = budget == null || baseBudget == null || budget <= baseBudget;
     labP.textContent = projFirst ? projText : baseText;
     labB.textContent = projFirst ? baseText : projText;
     labP.className = projFirst ? 'lab-projected' : 'lab-baseline';
@@ -98,9 +126,11 @@ export function updateRaceBanner(state, m, race, eta) {
 
 export function updateBaselineRow(state, race) {
   const target = document.getElementById('baseline-target');
-  if (race && (race.state === 'ahead' || race.state === 'behind') && race.targetLoss != null) {
-    const at = state.baselineTotalTimeMs != null ? ` at ${fmtDuration(state.baselineTotalTimeMs)}` : '';
-    target.textContent = `Target: baseline reached ${race.targetLoss.toFixed(3)} loss${at}`;
+  if (race && (race.state === 'ahead' || race.state === 'behind' || race.state === 'tied') && race.baselineFinishLoss != null) {
+    const at = race.baselineFinishBudgetMs != null ? ` at ${fmtDuration(race.baselineFinishBudgetMs)} budget` : '';
+    target.textContent = `Target: baseline finish ${race.baselineFinishLoss.toFixed(3)} loss${at}`;
+  } else if (race && race.state === 'unknown' && state.baselineRunId) {
+    target.textContent = 'Baseline selected — projecting its finish loss…';
   } else {
     target.textContent = 'Select a baseline to set the target quality';
   }

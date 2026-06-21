@@ -1,0 +1,69 @@
+/* ── Model Health tab ──────────────────────────────────────────────────────
+   Rows/bands over cards for dense metrics; cards only for the hero + top issues.
+   Reuses the shared diag-band-* (text colour) and diag-row-key classes. */
+#health-root { display: flex; flex-direction: column; gap: var(--sp-3); }
+.health-empty { padding: 60px var(--sp-4); text-align: center; color: var(--text-muted); }
+.health-empty-title { font-size: var(--fs-lg); color: var(--text-secondary); margin-bottom: var(--sp-2); }
+.health-empty-msg { font-size: var(--fs-sm); line-height: 1.6; }
+
+.health-badge { display: inline-block; padding: 1px 8px; border-radius: var(--r-pill); font-size: var(--fs-xs);
+                font-weight: 700; letter-spacing: 0.4px; border: 1px solid var(--border-strong); }
+.health-badge.diag-band-good { background: var(--success-dim); border-color: transparent; }
+.health-badge.diag-band-warn { background: var(--warn-dim); border-color: transparent; }
+.health-badge.diag-band-bad  { background: var(--danger-dim); border-color: transparent; }
+
+.health-summary { display: flex; flex-direction: column; gap: var(--sp-3); }
+.health-header { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.health-header-id { font-weight: 700; color: var(--text-primary); font-size: var(--fs-md);
+                    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-header-meta { display: flex; gap: var(--sp-3); color: var(--text-muted); font-size: var(--fs-sm);
+                      font-variant-numeric: tabular-nums; }
+.health-header-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); }
+
+.health-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+.health-hero { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-md);
+               padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-2); }
+.health-hero.diag-band-good { background: linear-gradient(180deg, var(--success-dim), transparent); border-color: rgba(52,211,153,0.40); }
+.health-hero.diag-band-warn { background: linear-gradient(180deg, var(--warn-dim), transparent); border-color: rgba(251,191,36,0.40); }
+.health-hero.diag-band-bad  { background: linear-gradient(180deg, var(--danger-dim), transparent); border-color: rgba(248,113,113,0.40); }
+.health-verdict { font-size: 32px; font-weight: 800; letter-spacing: 1px; line-height: 1; }
+.health-hero.diag-band-good .health-verdict { color: var(--success); }
+.health-hero.diag-band-warn .health-verdict { color: var(--warn); }
+.health-hero.diag-band-bad  .health-verdict { color: var(--danger); }
+.health-interp { color: var(--text-secondary); font-size: var(--fs-md); }
+.health-counts { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-2);
+                 font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.health-count b { font-size: var(--fs-lg); margin-right: 3px; }
+
+.health-issues { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-md);
+                 padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.health-issues-title { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em;
+                       color: var(--text-muted); }
+.health-issue { border-top: 1px solid var(--border-row); padding-top: var(--sp-2); }
+.health-issue:first-of-type { border-top: none; padding-top: 0; }
+.health-issue-head { display: flex; align-items: baseline; gap: var(--sp-2); }
+.health-issue-label { color: var(--text-secondary); }
+.health-issue-val { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.health-issue-trend { color: var(--text-muted); font-weight: 400; font-size: var(--fs-xs); margin-left: 4px; }
+.health-issue-why { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.4; margin-top: 2px; }
+
+.health-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--sp-2); }
+.health-group-row { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-sm);
+                    padding: var(--sp-2) var(--sp-3); }
+.health-group-head { display: flex; align-items: center; gap: var(--sp-2); }
+.health-group-tally { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted);
+                      font-variant-numeric: tabular-nums; }
+.health-group-vals { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: 6px; font-size: var(--fs-xs);
+                     font-variant-numeric: tabular-nums; }
+.health-group-val-label { color: var(--text-muted); }
+
+.health-timeline { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.health-chip { font: inherit; font-size: var(--fs-xs); padding: 2px 7px; border-radius: var(--r-pill);
+               border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+               font-variant-numeric: tabular-nums; background: transparent; }
+.health-chip.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.health-chip.diag-ok { color: var(--success); background: var(--success-dim); border-color: transparent; }
+.health-chip.diag-warn { color: var(--warn); background: var(--warn-dim); border-color: transparent; }
+.health-chip.diag-error { color: var(--danger); background: var(--danger-dim); border-color: transparent; }
+.health-latest { margin-left: var(--sp-2); padding: 2px 10px; }
+

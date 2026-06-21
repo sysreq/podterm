@@ -7,7 +7,7 @@ import { compareSelected, initCompare } from './compare.js';
 import { openLaunchDialog, initLaunch } from './launch.js';
 import { initLogs } from './logs.js';
 import { initConfigPanel } from './configpanel.js';
-import { initDiagnostics } from './diagnostics.js';
+import { initDiagnostics, openHealthTab } from './diagnostics.js';
 import { escapeHtml } from './dom.js';
 import { fetchJson } from './api.js';
 
@@ -54,6 +54,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-content').forEach((c) => c.classList.toggle('active', c.id === 'tab-' + tab));
   if (tab === 'history') loadHistory();
   if (tab === 'machines') renderMachines();
+  if (tab === 'health') openHealthTab(app.activePod);
   // Plotly renders 0-width inside display:none containers — resize on reveal.
   const shown = document.getElementById('tab-' + tab);
   if (shown && window.Plotly) {

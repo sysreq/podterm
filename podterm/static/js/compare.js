@@ -2,6 +2,7 @@
 // (verdict + headline side-by-side + per-block movers), and a summary table.
 import { app, emit } from './state.js';
 import { scaleY, lossYAxis, lossHover, plotLayout, plotConfig, COLORS } from './charts.js';
+import { observePlotlyResize } from './resize.js';
 import { escapeHtml } from './dom.js';
 import { fetchJson } from './api.js';
 
@@ -146,6 +147,8 @@ function renderCharts(data) {
   chartsEl.innerHTML = '<div class="chart-box" id="cmp-loss"></div><div class="chart-box" id="cmp-bpb"></div>';
   Plotly.newPlot('cmp-loss', lossTraces, { ...plotLayout, yaxis: lossYAxis, xaxis: { title: xTitle }, title: 'Training Loss Comparison', height: 300 }, plotConfig);
   Plotly.newPlot('cmp-bpb', bpbTraces, { ...plotLayout, xaxis: { title: xTitle }, title: 'Validation BPB Comparison', height: 300 }, plotConfig);
+  observePlotlyResize(document.getElementById('cmp-loss'));
+  observePlotlyResize(document.getElementById('cmp-bpb'));
 }
 
 // ── Model Health diff: verdict + headline side-by-side, plus per-run movers vs base ──

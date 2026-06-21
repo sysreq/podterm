@@ -1,0 +1,80 @@
+/* Model Health panel — off-pod diagnostics time series */
+#diagnostics-panel { background: var(--bg-panel); border: 1px solid var(--border);
+                     border-radius: var(--r-md); overflow: hidden; }
+.diag-sub { margin-left: auto; font-size: var(--fs-xs); color: var(--text-muted); }
+#diag-content { padding: var(--sp-3); }
+.diag-timeline { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--sp-3); }
+.diag-chip { font: inherit; font-size: var(--fs-xs); padding: 2px 7px; border-radius: var(--r-pill);
+             border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
+             font-variant-numeric: tabular-nums; }
+.diag-chip.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.diag-chip.diag-ok { color: var(--success); background: var(--success-dim); border-color: transparent; }
+.diag-chip.diag-warn, .diag-chip.diag-partial { color: var(--warn); background: var(--warn-dim); border-color: transparent; }
+.diag-chip.diag-error { color: var(--danger); background: var(--danger-dim); border-color: transparent; }
+/* Verdict count bar — proportional segments from health.counts + a text legend */
+.diag-verdict-bar { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.diag-vb-track { display: flex; flex: 1; height: 8px; border-radius: var(--r-pill); overflow: hidden;
+                 background: var(--bg-inset); }
+.diag-vb-seg { display: block; min-width: 3px; }
+.diag-vb-good { background: var(--success); }
+.diag-vb-warn { background: var(--warn); }
+.diag-vb-bad  { background: var(--danger); }
+.diag-vb-info { background: var(--text-secondary); }
+.diag-vb-na   { background: var(--text-muted); }
+.diag-vb-legend { font-size: var(--fs-xs); color: var(--text-muted); white-space: nowrap;
+                  font-variant-numeric: tabular-nums; }
+
+/* Headline metrics as concept-grouped tiles */
+.diag-group { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.06em;
+              color: var(--text-muted); margin: var(--sp-3) 0 var(--sp-2);
+              border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.diag-groups > .diag-group:first-child { margin-top: 0; }
+.diag-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+              gap: var(--sp-2); }
+.diag-card { border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--sp-2);
+             display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.diag-card-label { font-size: var(--fs-xs); color: var(--text-secondary);
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.diag-card-valline { display: flex; align-items: baseline; gap: 6px; }
+.diag-card-val { font-size: var(--fs-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.diag-card-trend { font-size: var(--fs-xs); color: var(--text-muted); }
+.diag-card-spark { height: 28px; }
+.diag-raw { margin-top: var(--sp-2); }
+.diag-raw summary { font-size: var(--fs-xs); color: var(--text-muted); cursor: pointer; }
+.diag-raw pre { background: var(--bg-inset); padding: var(--sp-3); border-radius: var(--r-sm);
+                font-size: var(--fs-xs); max-height: 320px; overflow: auto; margin-top: var(--sp-2); }
+
+/* Threshold bands — shared by the Model Health panel, the live verdict card, and the Compare diff */
+.diag-band-good { color: var(--success); }
+.diag-band-warn { color: var(--warn); }
+.diag-band-bad  { color: var(--danger); font-weight: 600; }
+.diag-band-na   { color: var(--text-muted); }
+.diag-band-info { color: var(--text-secondary); }
+
+/* Per-section / per-block drill-down */
+.diag-detail { margin-top: var(--sp-3); border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+.diag-detail-head { font-size: var(--fs-xs); color: var(--text-muted); margin-bottom: var(--sp-2); }
+.diag-section { margin-bottom: var(--sp-2); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.diag-section > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+                         padding: var(--sp-2) var(--sp-3); cursor: pointer; font-size: var(--fs-sm); }
+.diag-sec-name { color: var(--text-secondary); font-weight: 600; }
+.diag-sec-status { font-size: var(--fs-xs); }
+.diag-sec-status.diag-ok { color: var(--success); }
+.diag-sec-status.diag-partial { color: var(--warn); }
+.diag-sec-status.diag-error { color: var(--danger); }
+.diag-sec-status.diag-skipped { color: var(--text-muted); }
+.diag-rows { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+.diag-rows td { padding: 3px var(--sp-3); border-top: 1px solid var(--border); vertical-align: top; }
+.diag-row-key { color: var(--text-secondary); font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.diag-kv { display: inline-block; margin-right: var(--sp-3); font-variant-numeric: tabular-nums; }
+.diag-kv b { color: var(--text-muted); font-weight: 500; }
+.diag-trend { color: var(--text-muted); }
+.diag-unverified { color: var(--warn); font-size: var(--fs-xs); }
+
+/* Live verdict card is a doorway into the panel */
+.kpi-card.clickable { cursor: pointer; }
+.kpi-card.clickable:hover { border-color: var(--accent); }
+.kpi-card.verdict-ok .kpi-value-text { color: var(--success); }
+.kpi-card.verdict-warn .kpi-value-text { color: var(--warn); }
+.kpi-card.verdict-error .kpi-value-text { color: var(--danger); }
+

@@ -209,3 +209,7 @@ __marimo__/
 # Local
 .local/
 runpodctl.tar.gz
+model-metrics-improvements.md
+racebar-improvements.md
+screen-scaling.md
+trainloss-improvements.md

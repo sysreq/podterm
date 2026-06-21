@@ -34,12 +34,18 @@ body {
 .tab-content { display: none; flex: 1; overflow-y: auto; padding: var(--sp-4); }
 .tab-content.active { display: flex; flex-direction: column; }
 
-/* Live view stack */
+/* Live view stack. Rows declare a preferred height (the 1080p no-shift layout)
+   but the KPI/diag grids may wrap to extra rows; .tab-content scrolls when the
+   stack outgrows a short viewport rather than clipping content. */
 #live-view { display: none; }
 #live-view.visible { display: flex; flex-direction: column; gap: var(--sp-3); }
-#kpi-row { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr));
-           gap: var(--sp-3); height: var(--h-kpi); flex-shrink: 0; }
-#race-banner { height: var(--h-banner); flex-shrink: 0; }
-#baseline-row { height: var(--h-baseline); flex-shrink: 0; }
-#diag-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: var(--sp-3); height: var(--h-diag); flex-shrink: 0; }
+/* container-type lets .kpi-card type/padding react to the dashboard presentation
+   width (viewport minus sidebar), not the full browser width. */
+#kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--kpi-card-min), 1fr));
+           gap: var(--sp-3); height: auto; min-height: var(--h-kpi); flex-shrink: 0;
+           container-type: inline-size; }
+#race-banner { min-height: var(--h-banner); flex-shrink: 0; }
+#baseline-row { min-height: var(--h-baseline); flex-shrink: 0; }
+#diag-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--diag-card-min), 1fr));
+            gap: var(--sp-3); height: auto; min-height: var(--h-diag); flex-shrink: 0;
+            container-type: inline-size; }

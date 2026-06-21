@@ -1,0 +1,56 @@
+/* KPI cards */
+.kpi-card { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-md);
+            padding: 9px 10px; display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+            position: relative; }
+.kpi-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase;
+             letter-spacing: 0.2px; font-weight: 600; display: flex; gap: 3px; align-items: center;
+             white-space: nowrap; overflow: hidden; padding-right: 12px; }
+.kpi-label-text { overflow: hidden; text-overflow: ellipsis; }
+.kpi-info { cursor: help; font-size: 11px; color: var(--text-faint);
+            position: absolute; top: 7px; right: 8px; }
+/* Value font scales with the row's presentation width (cqi); the slot min-height
+   tracks the same expression so scaling stays no-layout-shift. Long values (e.g.
+   image names) ellipsize rather than overflow the card. */
+.kpi-value { --kpi-vfs: clamp(18px, 1.8cqi, 28px);
+             font-size: var(--kpi-vfs); font-weight: 700; color: var(--text-primary);
+             font-variant-numeric: tabular-nums; line-height: 1.2; margin-top: 2px;
+             white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+             min-height: calc(var(--kpi-vfs) * 1.2); }
+.kpi-unit { font-size: var(--fs-sm); color: var(--text-muted); font-weight: 600; margin-left: 3px; }
+.kpi-sub { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; white-space: nowrap;
+           overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; min-height: 14px; }
+.kpi-sub.success { color: var(--success); }
+.kpi-sub.danger { color: var(--danger); }
+.kpi-caption { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+               margin-top: 2px; min-height: 13px; white-space: nowrap; overflow: hidden;
+               text-overflow: ellipsis; }
+.kpi-caption.success { color: var(--success); }
+.kpi-caption.danger { color: var(--danger); }
+.kpi-foot { margin-top: auto; height: 26px; min-height: 26px; }
+.kpi-card.hero.ahead { border-color: rgba(52, 211, 153, 0.55);
+                       box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.25), 0 0 18px rgba(52, 211, 153, 0.10); }
+.kpi-card.hero.behind { border-color: rgba(248, 113, 113, 0.55);
+                        box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.25), 0 0 18px rgba(248, 113, 113, 0.10); }
+.kpi-card.is-note .kpi-sub { white-space: normal; }
+.kpi-note-text { color: var(--text-muted); font-size: var(--fs-xs); line-height: 1.45; margin-top: 2px;
+                 display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.pending-chip { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 1px;
+                text-transform: uppercase; color: var(--text-muted);
+                border: 1px dashed var(--border-strong); border-radius: var(--r-pill);
+                padding: 1px 8px; margin-bottom: 2px; }
+.bar-meter { height: 6px; background: var(--bg-inset); border-radius: 3px; overflow: hidden; margin-top: 9px; }
+.bar-meter-fill { height: 100%; background: var(--accent); border-radius: 3px; width: 0%; transition: width 0.3s; }
+
+/* Diagnostics row variant: taller sparkline, roomier sub line */
+.kpi-card.diag .kpi-foot { height: 46px; min-height: 46px; }
+.kpi-card.diag .kpi-sub { margin-top: 4px; }
+
+/* Compact label/caption/padding when the row itself is narrow. Container query →
+   reacts to the dashboard presentation width (not the full browser). The value
+   font is handled by the cqi clamp above, so it isn't overridden here. */
+@container (max-width: 1180px) {
+  .kpi-card { padding: 9px 8px; }
+  .kpi-label { font-size: 8.5px; letter-spacing: 0.1px; padding-right: 10px; }
+  .kpi-sub { font-size: 10px; }
+  .kpi-caption { font-size: 9px; letter-spacing: 0.6px; }
+}

@@ -1,4 +1,5 @@
 import { app, getPodState } from '../state.js';
+import * as derive from '../derive.js';
 import { scaleY, updateBaselineTrace } from '../charts.js';
 import { renderConfigPanel } from '../configpanel.js';
 import { fetchJson } from '../api.js';
@@ -27,12 +28,22 @@ function optionExists(select, value) {
 
 function resetBaselineState(state, runId) {
   state.baselineRunId = runId || null;
+  state.baselineRunRow = null;
+  state.baselineFinishBudgetMs = null;
   state.baselineByStep = {};
   state.baselineSteps = [];
   state.baselineTotalTimeMs = null;
   state.baselineX = [];
   state.baselineY = [];
   state.baselineRaw = [];
+}
+
+function observedTrainingTimeMs(metrics) {
+  for (let i = metrics.length - 1; i >= 0; i--) {
+    const m = metrics[i];
+    if (m && m.train_loss > 0 && m.train_time_ms > 0) return m.train_time_ms;
+  }
+  return null;
 }
 
 function updatePinButton() {
@@ -126,8 +137,18 @@ async function applyBaselineSelection(podId, runId) {
     state.baselineByStep[m.step] = m;
   }
   state.baselineSteps = metrics.map((m) => m.step).sort((a, b) => a - b);
-  const last = metrics[metrics.length - 1];
-  state.baselineTotalTimeMs = last ? last.train_time_ms : null;
+  state.baselineTotalTimeMs = observedTrainingTimeMs(metrics);
+
+  // The finish-horizon race needs the baseline's configured max-wallclock (its run
+  // row), not the last metric timestamp. Fall back to observed total for pre-budget runs.
+  try {
+    const baselineRow = await fetchJson(`/api/runs/${runId}`);
+    if (app.activePod !== podId || state.baselineRunId !== runId) return;
+    state.baselineRunRow = baselineRow;
+    state.baselineFinishBudgetMs = derive.configFinishBudgetMs(baselineRow) ?? state.baselineTotalTimeMs;
+  } catch {
+    state.baselineFinishBudgetMs = state.baselineTotalTimeMs;
+  }
 
   const baselineMetrics = metrics.filter((m) => m.train_loss);
   state.baselineX = baselineMetrics.map((m) => m.step);
