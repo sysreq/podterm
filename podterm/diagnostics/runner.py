@@ -1,10 +1,9 @@
 import json
+import os
 import subprocess
+import warnings
 from dataclasses import dataclass, fields as dc_fields
 from datetime import datetime, timezone
-
-import torch
-from torch.nn.attention import flex_attention as _flex_mod
 
 import config_gpt as C
 from . import anatomy, config, health, report
@@ -116,28 +115,32 @@ class Diagnostics:
         anat = anatomy.probe(self.model)
         rep = report.Report(self._meta(cfg, anat))
         ctx = RunContext(self.model, anat, self.optimizer, self.val_tokens, cfg, rep)
-        _flex_mod._WARNINGS_SHOWN.add("flex_attention_performance")
         was_training = self.model.training
         self.model.eval()
         print("=== DIAGNOSTICS ===")
         try:
-            for stage in self._stages():
-                missing = [r for r in stage.requires if not ctx.has(r)]
-                if missing:
-                    rep.emit(report.Section(
-                        stage.name,
-                        status=SKIPPED,
-                        reason=f"no {missing[0].replace('_', ' ')}",
-                    ))
-                    continue
-                try:
-                    stage.run(ctx)
-                except Exception as e:
-                    rep.emit(report.Section(
-                        stage.name,
-                        status=ERROR,
-                        reason=f"{type(e).__name__}: {e}",
-                    ))
+            # The model swaps in the SDPA flex equivalent, but suppress torch's "flex_attention
+            # called without torch.compile()" perf warning defensively — without reaching into
+            # torch.nn.attention.flex_attention._WARNINGS_SHOWN (a private implementation detail).
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="flex_attention called without")
+                for stage in self._stages():
+                    missing = [r for r in stage.requires if not ctx.has(r)]
+                    if missing:
+                        rep.emit(report.Section(
+                            stage.name,
+                            status=SKIPPED,
+                            reason=f"no {missing[0].replace('_', ' ')}",
+                        ))
+                        continue
+                    try:
+                        stage.run(ctx)
+                    except Exception as e:
+                        rep.emit(report.Section(
+                            stage.name,
+                            status=ERROR,
+                            reason=f"{type(e).__name__}: {e}",
+                        ))
         finally:
             if was_training:
                 self.model.train()
@@ -147,14 +150,36 @@ class Diagnostics:
             h = health.compute(doc)
             doc["status"] = h["overall"]
             doc["health"] = h
-            with open(path, "w") as f:
-                json.dump(doc, f, indent=2)
+            _atomic_write_json(path, doc)
             print(f"=== END DIAGNOSTICS [{h['overall']}] ===\nwrote {path}")
         return rep
+
+
+def _atomic_write_json(path, doc):
+    """Write the doc to a sibling temp file then os.replace() it into place, so a reader never
+    sees a half-written or stale file: the final path either has the previous content or this one."""
+    path = os.fspath(path)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(doc, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        # Don't leave a half-written temp behind on dump/replace failure (or an interrupt).
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def run_diagnostics(model, optimizer=None, val_tokens=None, json_path=None, extra_meta=None):
     try:
         return Diagnostics(model, optimizer, val_tokens, json_path, extra_meta).run()
     except Exception as e:
+        # Surface the failure: print for the subprocess log, then re-raise so __main__ exits
+        # non-zero and the outer runner never mistakes a failed run for a fresh result.
         print(f"diagnostics failed: {type(e).__name__}: {e}")
+        raise
