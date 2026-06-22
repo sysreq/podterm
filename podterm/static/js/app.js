@@ -1,5 +1,6 @@
 // Entry module: init, tab routing, pod polling, action wiring.
-import { app, on, dropPodState, getPodState, ensurePodStream, hydrateFromDb } from './state.js';
+import { app, on, dropPodState, hydrateFromDb } from './state.js';
+import { reconcileStreams, markPodActive } from './state/stream.js';
 import { renderRunList, initRunList } from './runlist.js';
 import { renderLiveView, initLive } from './live.js';
 import { loadHistory, clearSelection, initHistory } from './history.js';
@@ -10,10 +11,6 @@ import { initConfigPanel } from './configpanel.js';
 import { initDiagnostics, openHealthTab } from './diagnostics.js';
 import { escapeHtml } from './dom.js';
 import { fetchJson } from './api.js';
-
-// Browsers cap ~6 SSE connections per origin on HTTP/1.1 — stream at most
-// this many pods at once (the active pod always gets one).
-const MAX_STREAMS = 4;
 
 function setStatus(text) {
   document.getElementById('status').textContent = text;
@@ -50,7 +47,13 @@ async function refreshCompileCache() {
 
 // ── Tabs ──
 function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab').forEach((t) => {
+    const active = t.dataset.tab === tab;
+    t.classList.toggle('active', active);
+    t.setAttribute('aria-selected', active ? 'true' : 'false');
+    // Roving tabindex: only the selected tab is in the tab order; arrow keys move between the rest.
+    t.tabIndex = active ? 0 : -1;
+  });
   document.querySelectorAll('.tab-content').forEach((c) => c.classList.toggle('active', c.id === 'tab-' + tab));
   if (tab === 'history') loadHistory();
   if (tab === 'machines') renderMachines();
@@ -78,17 +81,14 @@ function renderMachines() {
 }
 
 // ── Pods ──
-function connectRunningPods() {
-  const running = app.pods.filter((p) => p.desiredStatus === 'RUNNING');
-  // Active pod first so it always lands inside the stream cap.
-  running.sort((a, b) => (a.id === app.activePod ? -1 : 0) - (b.id === app.activePod ? -1 : 0));
-  let open = app.pods.filter((p) => getPodState(p.id).es).length;
-  for (const p of running) {
-    if (getPodState(p.id).es) continue;
-    if (open >= MAX_STREAMS) break;
-    ensurePodStream(p.id);
-    hydrateFromDb(p.id);
-    open++;
+// Reconcile EventSource streams against the current pod list + active selection
+// (the stream manager reserves a slot for the active pod and LRU-evicts the rest),
+// then hydrate any freshly (re)opened streams from the DB. Force the hydrate so a
+// stream that was evicted and re-admitted backfills the metrics/logs that landed
+// while it was closed (a no-op extra fetch on a stream's very first open).
+function syncStreams() {
+  for (const podId of reconcileStreams(app.pods, app.activePod)) {
+    hydrateFromDb(podId, true);
   }
 }
 
@@ -96,7 +96,7 @@ async function refreshPods() {
   try {
     app.pods = await fetchJson('/api/pods');
     renderRunList(selectPod);
-    connectRunningPods();
+    syncStreams();
     const running = app.pods.filter((p) => p.desiredStatus === 'RUNNING').length;
     const queued = app.pods.length - running;
     setStatus(`${app.pods.length} pods, ${queued} queued`);
@@ -112,6 +112,8 @@ async function refreshPods() {
 
 function selectPod(podId) {
   app.activePod = podId;
+  markPodActive(podId); // protect it from LRU eviction
+  syncStreams();        // ensure the active pod has a stream, evicting a background one if at cap
   renderRunList(selectPod);
   switchTab('live');
   renderLiveView(podId);
@@ -134,9 +136,27 @@ async function stopPod() {
 
 // ── Init ──
 function init() {
-  document.querySelectorAll('.tab').forEach((t) => {
+  const tabs = [...document.querySelectorAll('.tab')];
+  tabs.forEach((t) => {
     t.addEventListener('click', () => switchTab(t.dataset.tab));
   });
+  // Arrow-key navigation across the tablist (left/right + home/end), per WAI-ARIA.
+  const tabBar = document.getElementById('tab-bar');
+  if (tabBar) {
+    tabBar.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(document.activeElement);
+      if (i === -1) return;
+      let next = -1;
+      if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      if (next === -1) return;
+      e.preventDefault();
+      switchTab(tabs[next].dataset.tab);
+      tabs[next].focus();
+    });
+  }
   document.getElementById('btn-launch').addEventListener('click', openLaunchDialog);
   document.getElementById('btn-stop').addEventListener('click', stopPod);
   document.getElementById('btn-refresh').addEventListener('click', refreshPods);
