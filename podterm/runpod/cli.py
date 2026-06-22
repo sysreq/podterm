@@ -27,20 +27,129 @@ TEMPLATE_PORTS = f"22/tcp,{EVENTD_PORT}/http"
 # Low-level RPC
 # ---------------------------------------------------------------------------
 
+# Flags whose *value* (the following arg) is secret-bearing and must never be
+# echoed into an exception message, traceback, or log. The serialized template
+# env passed via --env carries the per-run EVENTD_TOKEN; --password and any
+# token/secret-named flag are masked defensively.
+_SENSITIVE_FLAGS = frozenset({"--env", "--password", "--secret", "--token", "--api-key"})
+_REDACTED = "<redacted>"
+
+
+def _redact_args(args: tuple[str, ...] | list[str]) -> str:
+    """Render command args for display, masking values of sensitive flags.
+
+    The value immediately following a sensitive flag is replaced with
+    ``<redacted>`` so secrets (e.g. the EVENTD_TOKEN inside ``--env <json>``)
+    never reach logs or error bodies.
+    """
+    parts: list[str] = []
+    mask_next = False
+    for arg in args:
+        if mask_next:
+            parts.append(_REDACTED)
+            mask_next = False
+            continue
+        parts.append(arg)
+        if arg in _SENSITIVE_FLAGS:
+            mask_next = True
+    return " ".join(parts)
+
+
+def _sensitive_values(args: tuple[str, ...] | list[str]) -> list[str]:
+    """Collect secret substrings to scrub from any text runpodctl echoes back.
+
+    For each sensitive flag, the following arg is itself a secret; when that arg
+    is a serialized JSON env (``--env '{"EVENTD_TOKEN": "…", …}'``) its *values*
+    are also scrubbed individually, so a token echoed bare (not as the whole
+    JSON blob) is still masked. Longest-first so larger blobs are replaced
+    before their fragments.
+    """
+    values: list[str] = []
+    flag_seen = False
+    for arg in args:
+        if flag_seen:
+            flag_seen = False
+            if not arg:
+                continue
+            values.append(arg)
+            try:
+                parsed = json.loads(arg)
+            except (ValueError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                values.extend(str(v) for v in parsed.values() if str(v))
+            continue
+        if arg in _SENSITIVE_FLAGS:
+            flag_seen = True
+    # Replace longer secrets first to avoid leaving a fragment of a larger one.
+    return sorted(set(values), key=len, reverse=True)
+
+
+def _scrub(text: str, secrets: list[str]) -> str:
+    """Remove any known secret substrings from text (runpodctl may echo input)."""
+    for secret in secrets:
+        if secret and secret in text:
+            text = text.replace(secret, _REDACTED)
+    return text
+
+
+class RpcError(RuntimeError):
+    """A runpodctl invocation failed.
+
+    Subclasses ``RuntimeError`` so existing ``except Exception`` / ``except
+    RuntimeError`` call sites keep working. The string form is built solely
+    from the *redacted* command, return code, and *scrubbed* stderr — it never
+    includes raw secret-bearing argument values (``--env`` with the per-run
+    ``EVENTD_TOKEN``, ``--password``, …), so credentials cannot leak into logs,
+    tracebacks, or HTTP error bodies.
+    """
+
+    def __init__(self, command: str, returncode: int | None, stderr: str = "") -> None:
+        self.command = command
+        self.returncode = returncode
+        self.stderr = (stderr or "").strip()
+        rc = "?" if returncode is None else str(returncode)
+        msg = f"runpodctl {command} failed (exit {rc})"
+        if self.stderr:
+            msg += f": {self.stderr}"
+        super().__init__(msg)
+
 
 def _rpc(*args: str, timeout: int = 30) -> str:
-    """Run a runpodctl command and return stdout. Raises on failure."""
-    result = subprocess.run(
-        ["runpodctl", *args],
-        capture_output=True, text=True, timeout=timeout,
-    )
+    """Run a runpodctl command and return stdout.
+
+    Raises :class:`RpcError` on any failure (non-zero exit, timeout, missing
+    binary). Error messages are built from a redacted view of the arguments so
+    secret-bearing flag values never reach logs or HTTP error bodies.
+    """
+    command = _redact_args(args)
+    try:
+        result = subprocess.run(
+            ["runpodctl", *args],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except FileNotFoundError as exc:
+        raise RpcError(command, None, "runpodctl executable not found on PATH") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RpcError(command, None, f"timed out after {timeout}s") from exc
     if result.returncode != 0:
-        raise RuntimeError(f"runpodctl {' '.join(args)}: {result.stderr.strip()}")
+        # Scrub any secret arg values runpodctl may have echoed back into stderr.
+        stderr = _scrub(result.stderr, _sensitive_values(args))
+        raise RpcError(command, result.returncode, stderr)
     return result.stdout
 
 
 def _rpc_json(*args: str, **kwargs: object) -> dict | list:
-    return json.loads(_rpc(*args, **kwargs))
+    raw = _rpc(*args, **kwargs)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        # Report position only (`exc` stringifies to "<msg>: line L column C
+        # (char N)" — no document bytes) and a redacted command; never echo raw
+        # args, which may carry secrets.
+        raise RpcError(
+            _redact_args(args), None, f"invalid JSON in runpodctl output: {exc}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
