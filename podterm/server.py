@@ -8,11 +8,12 @@ drain + telemetry), pods.py (pod lifecycle), runpod/ (RunPod API), db.py
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -55,15 +56,51 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Cleanup
-    drain_task.cancel()
-    telemetry_task.cancel()
-    metadata_task.cancel()
+    # Ordered shutdown: stop producers → drain/await consumers → close db.
+    # 1. Stop poller threads first (signals + joins them) so no new events land.
     manager.stop_all()
+    # 2. Cancel the recurring tasks, then await each so their `finally` blocks
+    #    run (the drain loop flushes remaining metrics + awaits snapshot jobs).
+    for task in (drain_task, telemetry_task, metadata_task):
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.gather(
+            drain_task, telemetry_task, metadata_task, return_exceptions=True
+        )
+    # 3. Close the database last, after every consumer has finished.
     db.close()
 
 
 app = FastAPI(title="PodTerm", lifespan=lifespan)
+
+# Restrictive CSP that works whether Plotly is CDN-loaded or self-hosted under
+# /static/vendor/ ('self' covers the vendored copy).
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' https://cdn.plot.ly; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'none'"
+)
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": _CSP,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    # Header-only middleware: leaves the (possibly streaming) body untouched so
+    # SSE responses on /api/stream/... keep streaming to EventSource clients.
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 @app.get("/")
