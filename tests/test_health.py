@@ -132,3 +132,86 @@ def test_compute_does_not_mutate_input():
     before = copy.deepcopy(doc)
     health.compute(doc)
     assert doc == before
+
+
+# --- Malformed-schema hardening (finding 16) ---------------------------------------------------
+# A section can be present and 'ok' yet missing the exact row/key a headline entry expects (producer
+# schema drift, a partial stage write). And a stage can emit NaN/inf for a degenerate metric. Neither
+# may KeyError or masquerade as a passing band.
+
+def test_missing_row_resolves_to_none_no_keyerror():
+    # 'capacity: dead neurons' is present and ok, but its expected row 'global' is gone.
+    doc = _full_doc()
+    by_id = {e["id"]: e for e in health.HEADLINE}
+    del doc["sections"][0]["rows"]["global"]
+    # resolve() must return None (per its contract), not raise KeyError on rows[row].
+    assert health.resolve(doc, by_id["dead_neurons"]) is None
+
+
+def test_missing_key_in_present_row_resolves_to_none():
+    # Row present but the expected key absent -> nothing collected -> None.
+    doc = _full_doc()
+    by_id = {e["id"]: e for e in health.HEADLINE}
+    del doc["sections"][3]["rows"]["logits"]["sat"]
+    assert health.resolve(doc, by_id["logit_saturation"]) is None
+
+
+def test_nan_metric_does_not_classify_good():
+    # A NaN dead-neuron fraction must not slip through to 'good' (NaN >= bad is False, NaN >= warn is
+    # False, so a naive path would land in 'good'). It should be treated as unavailable -> None -> na.
+    doc = _full_doc()
+    by_id = {e["id"]: e for e in health.HEADLINE}
+    doc["sections"][0]["rows"]["global"]["dead"] = float("nan")
+    assert health.resolve(doc, by_id["dead_neurons"]) is None
+    out = health.compute(doc)
+    dead = [h for h in out["headline"] if h["id"] == "dead_neurons"][0]
+    assert dead["band"] == "na" and dead["value"] is None
+
+
+def test_inf_metric_does_not_classify_good():
+    doc = _full_doc()
+    by_id = {e["id"]: e for e in health.HEADLINE}
+    doc["sections"][0]["rows"]["global"]["dead"] = float("inf")
+    assert health.resolve(doc, by_id["dead_neurons"]) is None
+    dead = [h for h in health.compute(doc)["headline"] if h["id"] == "dead_neurons"][0]
+    assert dead["band"] == "na" and dead["value"] is None
+
+
+def test_nan_inside_list_is_dropped():
+    # Per-head lists with a NaN entry keep their finite members for the reduce.
+    doc = _full_doc()
+    by_id = {e["id"]: e for e in health.HEADLINE}
+    doc["sections"][2]["rows"]["enc1"]["entropy"] = [float("nan"), 3.0, 2.5]
+    assert health.resolve(doc, by_id["attn_entropy_min"]) == 2.5
+
+
+def test_overall_unaffected_by_missing_rows():
+    # Dropping rows from healthy sections degrades the affected metrics to na but never poisons the
+    # verdict: missing != sick, so the overall stays 'ok'.
+    doc = _full_doc()
+    del doc["sections"][0]["rows"]["global"]        # dead_neurons -> na
+    del doc["sections"][3]["rows"]["logits"]        # logit_saturation -> na
+    out = health.compute(doc)
+    assert out["overall"] == "ok"
+    bands = {h["id"]: h["band"] for h in out["headline"]}
+    assert bands["dead_neurons"] == "na"
+    assert bands["logit_saturation"] == "na"
+
+
+def test_completeness_reflects_evaluated_verdict_metrics():
+    # Additive completeness block: a full doc evaluates every verdict-bearing metric; a weights-only
+    # (forward-section-free) doc drops to a small fraction without changing the overall verdict.
+    out_full = health.compute(_full_doc())
+    comp = out_full["completeness"]
+    assert comp["total"] == sum(1 for e in health.HEADLINE if e["band"].get("kind") != "info")
+    assert comp["evaluated"] == comp["total"] and comp["fraction"] == 1.0
+
+    doc = _full_doc()
+    forward = {"capacity: dead neurons", "capacity: head output redundancy",
+               "capacity: attention entropy (bits)", "flow: logit saturation",
+               "flow: residual norm", "gradients", "flow: per-position loss"}
+    doc["sections"] = [s for s in doc["sections"] if s["name"] not in forward]
+    out_sparse = health.compute(doc)
+    assert out_sparse["overall"] == "ok"                         # still not sick
+    assert out_sparse["completeness"]["evaluated"] < out_full["completeness"]["evaluated"]
+    assert out_sparse["completeness"]["fraction"] < 1.0
