@@ -13,10 +13,35 @@ dependencies = [
 podterm = "podterm.__main__:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.14"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+# Quality gate, deliberately non-disruptive: tuned to pass on the current tree
+# without reformatting. Widen scope only on purpose (see per-file relaxations).
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle errors (E), pyflakes (F), and import-sorting (I) — a high-value,
+# low-noise subset. F catches real bugs (unused/undefined names).
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# The diagnostics package is single-sourced from the sibling gpt-golf checkout
+# (see CLAUDE.md) and intentionally mirrors that upstream's dense, compact
+# style — multi-statement lines, long lines, terse single-letter locals. Relax
+# those stylistic checks here to preserve the vendored layout; correctness
+# rules (undefined names, real import errors, etc.) still apply.
+"podterm/diagnostics/**" = ["E401", "E501", "E701", "E702", "E741", "F401", "I001"]
+# Test modules use compact, semicolon-joined setup lines for readability.
+"tests/**" = ["E701", "E702", "I001"]
+# Two pre-existing import-ordering nits in otherwise-clean modules, left as-is
+# to keep this gate additive. Remove these once the imports are re-sorted.
+"podterm/config.py" = ["I001"]
+"podterm/eventing/poller.py" = ["I001"]
 
 [build-system]
 requires = ["hatchling"]

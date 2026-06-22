@@ -16,20 +16,29 @@ explicitly excluded at the bottom so we don't burn demo time on non-issues.
 Scope reviewed: all of `podterm/` (backend + `runpod/` + `diagnostics/`), `static/` (JS/CSS/HTML),
 `tests/`, and project config (`pyproject.toml`, `.gitignore`, `.env.example`).
 
+> **Status update (kept in sync with the code):** the project-hygiene gate has landed —
+> ruff lint config (`[tool.ruff]` in `pyproject.toml`), a GitHub Actions workflow
+> (`.github/workflows/ci.yml`) running ruff + pytest + `node --test`, a root `README.md`,
+> and a `.pre-commit-config.yaml`. The `/api/compare` route is now typed (`CompareRequest`).
+> Items confirmed resolved are tagged **[RESOLVED]** inline below; the rest stay open backlog.
+
 ---
 
 ## Theme A — Project hygiene / engineering maturity (high demo signal, low risk)
 
-- **A1 — No linter/formatter configured.** `pyproject.toml` declares only `pytest`. Add a
-  `[tool.ruff]` section (lint + format) and run `ruff format` once across the tree. This is the
-  single highest-signal "we have standards" change for a demo.
-- **A2 — No CI.** There is no `.github/workflows/`. Add a minimal GitHub Actions workflow:
-  `ruff check`, `ruff format --check`, `pytest`, and `node --test` for the JS test (A4).
-- **A3 — No human-facing README.** Only `CLAUDE.md` (agent-facing) and `diagnostics/README.md`
-  exist. Add a short root `README.md`: what PodTerm is, how to run it (`uv run podterm`), and a
-  pointer to the architecture notes.
-- **A4 — Orphaned JS test.** `static/js/derive.test.mjs` has no runner (no `package.json`); it
-  is never executed. Wire `node --test static/js/derive.test.mjs` into CI (A2).
+- **A1 — No linter configured. [RESOLVED]** `pyproject.toml` now carries a `[tool.ruff]` /
+  `[tool.ruff.lint]` section (`select = ["E","F","I"]`, `line-length = 140`) tuned to pass on
+  the tree as-is; ruff is in the dev group. Scope note: this is a non-disruptive *lint* gate,
+  not a reformat — `ruff format` was deliberately **not** run (it would touch every module). A
+  formatter pass is a separate, larger decision.
+- **A2 — No CI. [RESOLVED]** `.github/workflows/ci.yml` runs on push + PR: `uv run ruff check .`,
+  `uv run pytest -q`, and `node --test` for both frontend test files. (No `ruff format --check`
+  — see A1.)
+- **A3 — No human-facing README. [RESOLVED]** A root `README.md` now covers what PodTerm is,
+  an architecture overview (pointing to `CLAUDE.md` for depth), setup/run, test commands, the
+  security model, and limitations.
+- **A4 — Orphaned JS test. [RESOLVED]** Both `podterm/static/js/derive.test.mjs` and
+  `diagnostics.test.mjs` are now wired into CI (`node --test`) and mirrored in pre-commit.
 - **A5 — User-Agent version drift.** `runpod/api.py:102` sends `podterm/0.1` while
   `events.py:71` / `snapshots.py:68` send `podterm/2.0` and `pyproject.toml` says `2.0.0`.
   Collapse to one `USER_AGENT` constant (folds into B1).
@@ -74,9 +83,9 @@ Scope reviewed: all of `podterm/` (backend + `runpod/` + `diagnostics/`), `stati
   vanishes. At minimum `log.warning`/`log.exception`. Note `telemetry_loop` (154) already logs,
   so this is also an internal *consistency* fix. (The best-effort sentinels in `runpod/*`,
   `helpers.py`, and the pod-daemon `_request` are intentional — leave as-is, optionally a debug log.)
-- **D2 — Untyped request body on `/api/compare`.** `routes/runs.py:29` takes `body: dict` and
-  hand-validates `run_ids`. Replace with a Pydantic model (`CompareRequest`) for automatic
-  validation + OpenAPI schema — idiomatic FastAPI and a nice thing to show in a demo.
+- **D2 — Untyped request body on `/api/compare`. [RESOLVED]** `routes/runs.py` now declares
+  `class CompareRequest(BaseModel)` and the handler takes `body: CompareRequest`, so validation
+  + the OpenAPI schema are automatic.
 
 ## Theme E — Test coverage on pure logic (supports the demo story)
 
@@ -122,15 +131,16 @@ the items. The notes below are handoff guidance for whoever picks them up.
 
 ## Recommended order (when tackled)
 
-**A (hygiene/CI/README) → B (dedup + phase constants) → D (error handling) → E (tests) →
+**A (hygiene/CI/README) [done] → B (dedup + phase constants) → D (error handling) → E (tests) →
 C (bloat refactors) → F (polish).** Front-load the low-risk, high-signal wins; do the larger
 structural refactors (C1/C2/C3) last, behind a smoke test, since C2 touches the event drain.
 
 ## How to verify each item (for the implementer)
 
-1. **Lint/format:** `uv run ruff check .` and `uv run ruff format --check .` (once A1 lands).
-2. **Python tests:** `uv run --with pytest pytest` (existing `tests/` + new E1 tests).
-3. **JS test:** `node --test podterm/static/js/derive.test.mjs`.
+1. **Lint:** `uv run ruff check .` (A1 landed; lint-only, no `ruff format`). Mirrored in CI
+   (A2) and `.pre-commit-config.yaml`.
+2. **Python tests:** `uv run pytest -q` (existing `tests/` + new E1 tests).
+3. **JS tests:** `node --test podterm/static/js/derive.test.mjs podterm/static/js/diagnostics.test.mjs`.
 4. **Smoke the app** — the risky changes touch the load-bearing phase strings (B2) and the
    shared HTTP path (B1). Launch with `uv run podterm`, open the UI, and confirm with
    `scripts/ui_shot.py` (it also reports console errors) that:
