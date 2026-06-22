@@ -62,13 +62,21 @@ class EventPipeline:
     # -- lifecycle ----------------------------------------------------------
 
     def finalize_run(self, pod_id: str) -> None:
+        # Read in-memory state but keep it until the DB write commits, so a failed
+        # finalize can be retried instead of silently dropping the summary/exit code
+        # (F5). db.finish_run is idempotent (COALESCE-guarded), so repeated calls
+        # from the finish phase, pod_gone, and manual stop converge safely.
+        summary = self.run_summary.get(pod_id)
+        memory = self.run_memory.get(pod_id)
+        exit_code = self.run_exit_code.get(pod_id)
         try:
-            summary = self.run_summary.pop(pod_id, None)
-            memory = self.run_memory.pop(pod_id, None)
-            exit_code = self.run_exit_code.pop(pod_id, None)
             db.finish_run(pod_id, summary=summary, memory=memory, exit_code=exit_code)
         except Exception:
             self.log.exception("failed to finalize run pod=%s", pod_id)
+            return
+        self.run_summary.pop(pod_id, None)
+        self.run_memory.pop(pod_id, None)
+        self.run_exit_code.pop(pod_id, None)
 
     # -- event handlers ----------------------------------------------------
 
