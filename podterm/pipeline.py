@@ -21,6 +21,15 @@ from podterm.sse import SSEHub, hub
 
 TELEMETRY_POLL_SEC = 5.0
 
+# Cap concurrent off-pod diagnostics across all pods so simultaneous snapshots
+# can't exhaust local CPU/RAM/GPU. Kept small and constant on purpose.
+SNAPSHOT_CONCURRENCY = 2
+
+# Bound the number of times a per-pod metrics batch is retried after a failed
+# DB write before it's dropped, so a permanently-failing write can't grow the
+# buffer without limit.
+MAX_METRIC_FLUSH_RETRIES = 10
+
 
 def _first_payload_value(payload: dict, *keys: str) -> object:
     for key in keys:
@@ -41,24 +50,47 @@ class EventPipeline:
         self.run_summary: dict[str, RunSummary] = {}
         self.run_exit_code: dict[str, int] = {}
         self.log = logging.getLogger("podterm.pipeline")
+        # In-flight snapshot-diagnostic tasks, tracked so they're not GC'd and
+        # so shutdown can await them (see drain_loop's finally block).
+        self._snapshot_tasks: set[asyncio.Task] = set()
+        # Bound concurrent diagnostics across pods. Created lazily on first use
+        # so the bound semaphore binds to the running loop, not import time.
+        self._snapshot_sem: asyncio.Semaphore | None = None
+        # Per-pod failed-flush retry counters (pod_id → consecutive failures).
+        self._metric_flush_failures: dict[str, int] = {}
 
     # -- lifecycle ----------------------------------------------------------
 
     def finalize_run(self, pod_id: str) -> None:
+        # Read in-memory state but keep it until the DB write commits, so a failed
+        # finalize can be retried instead of silently dropping the summary/exit code
+        # (F5). db.finish_run is idempotent (COALESCE-guarded), so repeated calls
+        # from the finish phase, pod_gone, and manual stop converge safely.
+        summary = self.run_summary.get(pod_id)
+        memory = self.run_memory.get(pod_id)
+        exit_code = self.run_exit_code.get(pod_id)
         try:
-            summary = self.run_summary.pop(pod_id, None)
-            memory = self.run_memory.pop(pod_id, None)
-            exit_code = self.run_exit_code.pop(pod_id, None)
             db.finish_run(pod_id, summary=summary, memory=memory, exit_code=exit_code)
         except Exception:
             self.log.exception("failed to finalize run pod=%s", pod_id)
+            return
+        self.run_summary.pop(pod_id, None)
+        self.run_memory.pop(pod_id, None)
+        self.run_exit_code.pop(pod_id, None)
 
     # -- event handlers ----------------------------------------------------
 
     def _handle_metric(self, pod_id: str, payload: dict, metrics_buffer: dict[str, list[StepMetric]]) -> None:
+        # Absent train_loss stays None — never a 0.0 sentinel. The producer emits a
+        # val-only metric at the SAME step as the final real train metric, and the DB
+        # upsert merges per-step rows with COALESCE, which preserves the prior value
+        # only when the incoming one is NULL (not 0.0). Coercing absent->0.0 would let
+        # that val-only event clobber the real per-step loss on merge. A genuine 0.0
+        # (never produced by a real cross-entropy loss) is preserved as-is.
+        train_loss = payload.get("train_loss")
         event = StepMetric(
             step=payload.get("step", 0), total_steps=payload.get("total_steps", 0),
-            train_loss=payload.get("train_loss") or 0.0,
+            train_loss=train_loss,
             train_time_ms=payload.get("train_time_ms", 0),
             step_avg_ms=payload.get("step_avg_ms", 0.0),
             val_loss=payload.get("val_loss"), val_bpb=payload.get("val_bpb"),
@@ -133,14 +165,46 @@ class EventPipeline:
         if exit_code is not None:
             self.run_exit_code[pod_id] = exit_code
         if "Starting Training" in phase:
+            # Reset on restart: drop the stale buffer AND its retry counter so the
+            # new run gets a fresh flush-retry budget rather than inheriting the
+            # previous run's failure count on the same pod_id.
             metrics_buffer.pop(pod_id, None)
+            self._metric_flush_failures.pop(pod_id, None)
             return
         if "Training finished" in phase:
             self.finalize_run(pod_id)
 
     def _handle_snapshot(self, pod_id: str, payload: dict) -> None:
         self.sse.send(pod_id, "snapshot", {"step": payload.get("step"), "final": payload.get("final")})
-        asyncio.create_task(snapshots.handle_snapshot(pod_id, payload))
+        task = asyncio.create_task(self._run_snapshot(pod_id, payload))
+        # Track the task so it isn't garbage-collected mid-flight and so shutdown
+        # can await it; the done-callback discards it and surfaces exceptions.
+        self._snapshot_tasks.add(task)
+        task.add_done_callback(self._on_snapshot_done)
+
+    def _on_snapshot_done(self, task: asyncio.Task) -> None:
+        self._snapshot_tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self.log.error("snapshot task failed", exc_info=exc)
+
+    async def _run_snapshot(self, pod_id: str, payload: dict) -> None:
+        """Run snapshot diagnostics off-loop, then fan out the SSE on the loop.
+
+        The worker thread (inside handle_snapshot) must not touch the asyncio
+        SSE queues; it returns the diagnostic event payload(s) and we send them
+        here, back on the event loop — one `diagnostic` per processed snapshot.
+        A semaphore bounds concurrent diagnostics across pods so simultaneous
+        snapshots can't exhaust local CPU/RAM/GPU.
+        """
+        if self._snapshot_sem is None:
+            self._snapshot_sem = asyncio.Semaphore(SNAPSHOT_CONCURRENCY)
+        async with self._snapshot_sem:
+            events = await snapshots.handle_snapshot(pod_id, payload)
+        for event in events:
+            self.sse.send(pod_id, "diagnostic", event)
 
     def _handle_pull(self, pod_id: str, payload: dict) -> None:
         self.sse.send(pod_id, "pull", payload)
@@ -191,12 +255,33 @@ class EventPipeline:
         self._handle_event(pod_id, payload, metrics_buffer)
 
     def _flush_metrics(self, metrics_buffer: dict[str, list[StepMetric]]) -> None:
-        for pid, metrics in metrics_buffer.items():
+        # Remove a per-pod batch only once its write commits; a failed write
+        # (transient SQLite lock, serialization error) keeps the batch buffered
+        # for a bounded number of retries so we don't silently lose metrics, but
+        # also can't grow the buffer without limit on a permanent failure.
+        for pid in list(metrics_buffer.keys()):
+            metrics = metrics_buffer[pid]
             try:
                 db.add_metrics_batch(pid, metrics)
             except Exception:
-                self.log.exception("failed to persist metrics batch pod=%s count=%s", pid, len(metrics))
-        metrics_buffer.clear()
+                failures = self._metric_flush_failures.get(pid, 0) + 1
+                self._metric_flush_failures[pid] = failures
+                if failures >= MAX_METRIC_FLUSH_RETRIES:
+                    self.log.exception(
+                        "dropping metrics batch after %s failed flush attempts pod=%s count=%s",
+                        failures, pid, len(metrics),
+                    )
+                    del metrics_buffer[pid]
+                    self._metric_flush_failures.pop(pid, None)
+                else:
+                    self.log.warning(
+                        "failed to persist metrics batch pod=%s count=%s (attempt %s/%s) — retrying",
+                        pid, len(metrics), failures, MAX_METRIC_FLUSH_RETRIES,
+                    )
+                continue
+            # Commit succeeded: drop the batch and reset its failure counter.
+            del metrics_buffer[pid]
+            self._metric_flush_failures.pop(pid, None)
 
     # -- background loops ---------------------------------------------------
 
@@ -205,24 +290,70 @@ class EventPipeline:
         metrics_buffer: dict[str, list[StepMetric]] = {}
         last_flush = time.monotonic()
 
-        while True:
-            drained = 0
-            while drained < 500:
-                try:
-                    pod_id, kind, payload = self.queue.get_nowait()
-                except queue.Empty:
-                    break
-                drained += 1
+        try:
+            while True:
+                drained = 0
+                while drained < 500:
+                    try:
+                        pod_id, kind, payload = self.queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    drained += 1
 
-                self._handle_queue_item(pod_id, kind, payload, metrics_buffer)
+                    # Error boundary per queue item: one malformed event, bad
+                    # numeric conversion, or DB hiccup must not kill the sole
+                    # drain task that drives all metric persistence + live updates.
+                    try:
+                        self._handle_queue_item(pod_id, kind, payload, metrics_buffer)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        event_type = payload.get("t") if isinstance(payload, dict) else None
+                        self.log.exception(
+                            "event processing failed",
+                            extra={"pod_id": pod_id, "event_type": event_type},
+                        )
 
-            # Batch-flush metrics to DB every 5 seconds
-            now = time.monotonic()
-            if now - last_flush > 5 and metrics_buffer:
+                # Batch-flush metrics to DB every 5 seconds
+                now = time.monotonic()
+                if now - last_flush > 5 and metrics_buffer:
+                    self._flush_metrics(metrics_buffer)
+                    last_flush = now
+
+                await asyncio.sleep(0.05)
+        finally:
+            # On task cancellation at shutdown, persist any buffered metrics and
+            # let in-flight diagnostics finish/clean up before we exit. The flush
+            # is synchronous, so it always completes here. Awaiting the snapshot
+            # tasks only takes effect if the canceller awaits this task after
+            # cancelling it (see server.py shutdown ordering); we use the
+            # shield-and-reawait pattern so the cancellation thrown into our
+            # `await` doesn't abandon the in-flight diagnostics half-done.
+            if metrics_buffer:
                 self._flush_metrics(metrics_buffer)
-                last_flush = now
+            await self._drain_snapshot_tasks()
 
-            await asyncio.sleep(0.05)
+    async def _drain_snapshot_tasks(self) -> None:
+        """Wait for in-flight snapshot tasks to finish, surviving cancellation.
+
+        A plain `await asyncio.shield(gather(...))` inside an already-cancelled
+        task re-raises CancelledError at the await point, abandoning the still-
+        running tasks. Re-awaiting the same shielded future swallows the injected
+        cancellation until the underlying gather actually completes.
+        """
+        if not self._snapshot_tasks:
+            return
+        inner = asyncio.gather(*self._snapshot_tasks, return_exceptions=True)
+        shielded = asyncio.shield(inner)
+        while True:
+            try:
+                await shielded
+                return
+            except asyncio.CancelledError:
+                if inner.done():
+                    return
+                # Cancellation was aimed at us, not the diagnostics: keep waiting.
+                continue
 
     async def telemetry_loop(self) -> None:
         """Poll utilization for all pods and emit SSE `telemetry` events.
