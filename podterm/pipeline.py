@@ -90,6 +90,42 @@ class EventPipeline:
         if run_fields:
             db.update_run(pod_id, **run_fields)
 
+    def _handle_model(self, pod_id: str, payload: dict) -> None:
+        model_params = payload.get("model_params")
+        self._handle_info_update(pod_id, "info", {"model_params": model_params}, model_params=model_params)
+
+    def _handle_config(self, pod_id: str, payload: dict) -> None:
+        seed = _first_payload_value(payload, "seed")
+        seq_len = _first_payload_value(payload, "seq_len", "sequence_length")
+        batch_tokens = _first_payload_value(payload, "batch_tokens", "batch_size", "batch")
+        info = {
+            "seed": seed,
+            "seq_len": seq_len,
+            "batch_tokens": batch_tokens,
+            "grad_accum": payload.get("grad_accum"),
+        }
+        self._handle_info_update(pod_id, "info", info, seed=seed, seq_len=seq_len, batch_tokens=batch_tokens)
+
+    def _handle_commit(self, pod_id: str, payload: dict) -> None:
+        info = {"commit_hash": payload.get("commit_hash"), "commit_msg": payload.get("commit_msg")}
+        self._handle_info_update(pod_id, "info", info, **info)
+
+    def _handle_gpu(self, pod_id: str, payload: dict) -> None:
+        info = {
+            "gpu_type": payload.get("gpu_type"),
+            "driver_version": payload.get("driver_version"),
+            "cuda_version": payload.get("cuda_version"),
+        }
+        self._handle_info_update(
+            pod_id,
+            "info",
+            info,
+            gpu_type=payload.get("gpu_type"),
+            gpu_count=payload.get("gpu_count", 1),
+            driver_version=payload.get("driver_version"),
+            cuda_version=payload.get("cuda_version"),
+        )
+
     def _handle_phase(self, pod_id: str, payload: dict, metrics_buffer: dict[str, list[StepMetric]]) -> None:
         phase = str(payload.get("phase", ""))
         exit_code = payload.get("exit_code")
@@ -98,55 +134,61 @@ class EventPipeline:
             self.run_exit_code[pod_id] = exit_code
         if "Starting Training" in phase:
             metrics_buffer.pop(pod_id, None)
-        elif "Training finished" in phase:
+            return
+        if "Training finished" in phase:
             self.finalize_run(pod_id)
 
     def _handle_snapshot(self, pod_id: str, payload: dict) -> None:
         self.sse.send(pod_id, "snapshot", {"step": payload.get("step"), "final": payload.get("final")})
         asyncio.create_task(snapshots.handle_snapshot(pod_id, payload))
 
+    def _handle_pull(self, pod_id: str, payload: dict) -> None:
+        self.sse.send(pod_id, "pull", payload)
+
+    def _handle_pod_gone(self, pod_id: str, payload: dict) -> None:
+        self.finalize_run(pod_id)
+
+    def _handle_raw(self, pod_id: str, payload: dict) -> None:
+        self.sse.send(pod_id, "log", {"line": payload.get("line", "")})
+
+    _EVENT_HANDLERS = {
+        "memory": "_handle_memory",
+        "summary": "_handle_summary",
+        "model": "_handle_model",
+        "config": "_handle_config",
+        "commit": "_handle_commit",
+        "gpu": "_handle_gpu",
+        "snapshot": "_handle_snapshot",
+        "pull": "_handle_pull",
+        "pod_gone": "_handle_pod_gone",
+        "raw": "_handle_raw",
+    }
+
     def _handle_event(self, pod_id: str, payload: dict, metrics_buffer: dict[str, list[StepMetric]]) -> None:
         t = payload.get("t")
         if t == "metric":
             self._handle_metric(pod_id, payload, metrics_buffer)
-        elif t == "memory":
-            self._handle_memory(pod_id, payload)
-        elif t == "summary":
-            self._handle_summary(pod_id, payload)
-        elif t == "model":
-            self._handle_info_update(pod_id, "info", {"model_params": payload.get("model_params")},
-                                     model_params=payload.get("model_params"))
-        elif t == "config":
-            seed = _first_payload_value(payload, "seed")
-            seq_len = _first_payload_value(payload, "seq_len", "sequence_length")
-            batch_tokens = _first_payload_value(payload, "batch_tokens", "batch_size", "batch")
-            info = {
-                "seed": seed,
-                "seq_len": seq_len,
-                "batch_tokens": batch_tokens,
-                "grad_accum": payload.get("grad_accum"),
-            }
-            self._handle_info_update(pod_id, "info", info, seed=seed, seq_len=seq_len, batch_tokens=batch_tokens)
-        elif t == "commit":
-            info = {"commit_hash": payload.get("commit_hash"), "commit_msg": payload.get("commit_msg")}
-            self._handle_info_update(pod_id, "info", info, **info)
-        elif t == "gpu":
-            info = {"gpu_type": payload.get("gpu_type"), "driver_version": payload.get("driver_version"),
-                    "cuda_version": payload.get("cuda_version")}
-            self._handle_info_update(pod_id, "info", info, gpu_type=payload.get("gpu_type"),
-                                     gpu_count=payload.get("gpu_count", 1),
-                                     driver_version=payload.get("driver_version"),
-                                     cuda_version=payload.get("cuda_version"))
-        elif t == "phase":
+            return
+        if t == "phase":
             self._handle_phase(pod_id, payload, metrics_buffer)
-        elif t == "snapshot":
-            self._handle_snapshot(pod_id, payload)
-        elif t == "pull":
-            self.sse.send(pod_id, "pull", payload)
-        elif t == "pod_gone":
-            self.finalize_run(pod_id)
-        elif t == "raw":
-            self.sse.send(pod_id, "log", {"line": payload.get("line", "")})
+            return
+
+        handler_name = self._EVENT_HANDLERS.get(t)
+        if handler_name is None:
+            return
+        getattr(self, handler_name)(pod_id, payload)
+
+    def _handle_queue_item(
+        self,
+        pod_id: str,
+        kind: str,
+        payload: dict,
+        metrics_buffer: dict[str, list[StepMetric]],
+    ) -> None:
+        if kind == "log":
+            self.sse.send(pod_id, "log", payload)
+            return
+        self._handle_event(pod_id, payload, metrics_buffer)
 
     def _flush_metrics(self, metrics_buffer: dict[str, list[StepMetric]]) -> None:
         for pid, metrics in metrics_buffer.items():
@@ -172,11 +214,7 @@ class EventPipeline:
                     break
                 drained += 1
 
-                if kind == "log":
-                    self.sse.send(pod_id, "log", payload)
-                    continue
-
-                self._handle_event(pod_id, payload, metrics_buffer)
+                self._handle_queue_item(pod_id, kind, payload, metrics_buffer)
 
             # Batch-flush metrics to DB every 5 seconds
             now = time.monotonic()

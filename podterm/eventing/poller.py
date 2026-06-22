@@ -68,6 +68,35 @@ class PodPoller(threading.Thread):
         except Exception:
             return 0, None, b""
 
+    @staticmethod
+    def _parse_json_body(body: bytes):
+        try:
+            return json.loads(body)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _is_terminal_status(status: object) -> bool:
+        return status in ("EXITED", "TERMINATED")
+
+    def _pod_is_terminal(self, pod: dict | None) -> bool:
+        return bool(pod and self._is_terminal_status(pod.get("desiredStatus")))
+
+    def _check_pod_gone(self) -> bool:
+        if self.skip_pod_checks:
+            return False
+        pod = api_get_pod(self.pod_id)
+        return pod is None or self._pod_is_terminal(pod)
+
+    def _daemon_pod_stopped(self, tick: int) -> bool:
+        if self.skip_pod_checks or tick % 10 != 0:
+            return False
+        pod = api_get_pod(self.pod_id)
+        if not self._pod_is_terminal(pod):
+            return False
+        self.emit_log(f"Pod {pod['desiredStatus']}.")
+        return True
+
     def _boot_tick(self) -> None:
         """Pull machine logs once; emit host lines + a pull snapshot on change."""
         if not self._boot_enabled or self.skip_pod_checks:
@@ -126,15 +155,18 @@ class PodPoller(threading.Thread):
                 return False
             self._boot_tick()
             pod = api_get_pod(self.pod_id)
-            if pod:
-                status = pod.get("desiredStatus", "UNKNOWN")
-                if status in ("EXITED", "TERMINATED"):
-                    self.emit_log(f"Pod {status}.")
-                    return False
-                if status == "RUNNING":
-                    return True
-                if tick % 3 == 0:
-                    self.emit_log(f"  Status: {status}  (waiting...)")
+            if not pod:
+                time.sleep(3)
+                continue
+
+            status = pod.get("desiredStatus", "UNKNOWN")
+            if self._is_terminal_status(status):
+                self.emit_log(f"Pod {status}.")
+                return False
+            if status == "RUNNING":
+                return True
+            if tick % 3 == 0:
+                self.emit_log(f"  Status: {status}  (waiting...)")
             time.sleep(3)
         self.emit_log("Timed out waiting for pod to start.")
         return False
@@ -153,10 +185,7 @@ class PodPoller(threading.Thread):
             self._boot_tick()
             status, _, body = self._request("/health", timeout=10)
             if status == 200:
-                try:
-                    health = json.loads(body)
-                except ValueError:
-                    health = {}
+                health = self._parse_json_body(body) or {}
                 self.emit_log(f"Event daemon connected  |  {self.base_url}")
                 return int(health.get("log_size", 0))
             if status == 401:
@@ -166,11 +195,8 @@ class PodPoller(threading.Thread):
                 self.emit_log("  Waiting for event daemon (pod booting)...")
                 announced = True
             tick += 1
-            if not self.skip_pod_checks and tick % 10 == 0:
-                pod = api_get_pod(self.pod_id)
-                if pod and pod.get("desiredStatus") in ("EXITED", "TERMINATED"):
-                    self.emit_log(f"Pod {pod['desiredStatus']}.")
-                    return None
+            if self._daemon_pod_stopped(tick):
+                return None
             time.sleep(3)
         self.emit_log("Timed out waiting for event daemon.")
         return None
@@ -184,6 +210,30 @@ class PodPoller(threading.Thread):
         key = get_ssh_key_path() or (info.get("ssh_key") or {}).get("path", "~/.ssh/id_ed25519")
         self.emit_log(f"SSH ready  |  ssh root@{ip} -p {port} -i {key}")
 
+    def _event_payload(self, status: int, body: bytes):
+        if status != 200:
+            return None
+        return self._parse_json_body(body)
+
+    def _emit_event_batch(self, data, cur: int) -> tuple[int, bool]:
+        finished = False
+        for ev in data.get("events", []):
+            if ev.get("t") == "phase" and "Training finished" in str(ev.get("phase", "")):
+                finished = True
+            self.log_queue.put((self.pod_id, "event", ev))
+        return int(data.get("next", cur)), finished
+
+    def _record_gone_check(self, gone_checks: int, finished: bool) -> tuple[int, bool]:
+        if not self._check_pod_gone():
+            return 0, False
+        gone_checks += 1
+        if gone_checks < 2:
+            return gone_checks, False
+        if not finished:
+            self.log_queue.put((self.pod_id, "event", {"t": "pod_gone"}))
+        self.emit_log("Pod stopped.")
+        return gone_checks, True
+
     def _events_loop(self) -> None:
         """Long-poll /events from cursor 0. Replays are safe: db writes are idempotent."""
         cur = 0
@@ -192,56 +242,46 @@ class PodPoller(threading.Thread):
         backoff = 2.0
         while not self._stop_event.is_set():
             status, _, body = self._request(f"/events?since={cur}&wait=25", timeout=40)
-            data = None
-            if status == 200:
-                try:
-                    data = json.loads(body)
-                except ValueError:
-                    data = None  # 200 with a non-JSON body (proxy interstitial): treat as transient
+            data = self._event_payload(status, body)
             if data is not None:
                 gone_checks = 0
                 backoff = 2.0
-                for ev in data.get("events", []):
-                    if ev.get("t") == "phase" and "Training finished" in str(ev.get("phase", "")):
-                        finished = True
-                    self.log_queue.put((self.pod_id, "event", ev))
-                cur = int(data.get("next", cur))
+                cur, batch_finished = self._emit_event_batch(data, cur)
+                finished = finished or batch_finished
                 continue
             if status == 401:
                 self.emit_log("Event daemon auth failed (token mismatch).")
                 return
             # Transient failure (conn error / proxy 5xx): check whether the pod is gone.
             # Two consecutive confirmations so one flaky runpodctl call can't end the run.
-            if self.skip_pod_checks:
-                pod_gone = False
-            else:
-                pod = api_get_pod(self.pod_id)
-                pod_gone = pod is None or pod.get("desiredStatus") in ("EXITED", "TERMINATED")
-            if pod_gone:
-                gone_checks += 1
-                if gone_checks >= 2:
-                    if not finished:
-                        self.log_queue.put((self.pod_id, "event", {"t": "pod_gone"}))
-                    self.emit_log("Pod stopped.")
-                    return
-            else:
-                gone_checks = 0
+            gone_checks, should_stop = self._record_gone_check(gone_checks, finished)
+            if should_stop:
+                return
             self._stop_event.wait(backoff)
             backoff = min(backoff * 2, 30.0)
+
+    def _wait_for_next_log_poll(self) -> None:
+        self._stop_event.wait(2.0)
 
     def _log_loop(self, offset: int) -> None:
         """Poll /log every 2s for raw log bytes; emit complete lines."""
         buf = b""
         while not self._stop_event.is_set():
             status, headers, body = self._request(f"/log?offset={offset}&limit=262144", timeout=15)
-            if status == 200:
-                new_offset = int(headers.get("X-Log-Offset", offset + len(body)))
-                if new_offset < offset:  # log file recreated — daemon reset us to 0
-                    buf = b""
-                offset = new_offset
-                if body:
-                    buf += body
-                    *lines, buf = buf.split(b"\n")
-                    for raw in lines:
-                        self.emit_log(raw.decode("utf-8", errors="replace").rstrip("\r"))
-            self._stop_event.wait(2.0)
+            if status != 200:
+                self._wait_for_next_log_poll()
+                continue
+
+            new_offset = int(headers.get("X-Log-Offset", offset + len(body)))
+            if new_offset < offset:  # log file recreated — daemon reset us to 0
+                buf = b""
+            offset = new_offset
+            if not body:
+                self._wait_for_next_log_poll()
+                continue
+
+            buf += body
+            *lines, buf = buf.split(b"\n")
+            for raw in lines:
+                self.emit_log(raw.decode("utf-8", errors="replace").rstrip("\r"))
+            self._wait_for_next_log_poll()
