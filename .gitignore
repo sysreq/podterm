@@ -213,3 +213,6 @@ model-metrics-improvements.md
 racebar-improvements.md
 screen-scaling.md
 trainloss-improvements.md
+
+# Ephemeral agent worktrees (created by the harness, never committed)
+.claude/worktrees/
