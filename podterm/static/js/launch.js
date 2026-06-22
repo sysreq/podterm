@@ -58,13 +58,37 @@ function fillSelect(id, options, defaultVal) {
   }
 }
 
+// Guards against stale datacenter→GPU responses: each call bumps a version and
+// aborts the prior in-flight fetch, then ignores any result whose datacenter no
+// longer matches the current selection (rapid DC switches can resolve out of order).
+let dcFetchController = null;
+let dcFetchVersion = 0;
+
 async function onDcChange() {
   const dc = document.getElementById('f-dc').value;
-  const gpus = await fetchJson(`/api/gpus/${dc}`);
+  const version = ++dcFetchVersion;
+  if (dcFetchController) dcFetchController.abort();
+  const controller = new AbortController();
+  dcFetchController = controller;
+
+  let gpus;
+  try {
+    gpus = await fetchJson(`/api/gpus/${encodeURIComponent(dc)}`, { signal: controller.signal });
+  } catch (e) {
+    if (e.name === 'AbortError') return; // superseded by a newer DC selection
+    throw e;
+  } finally {
+    if (dcFetchController === controller) dcFetchController = null;
+  }
+  // Drop the result if a newer selection started after we did.
+  if (version !== dcFetchVersion) return;
   fillSelect('f-gpu', gpus, null);
 }
 
+let launchInFlight = false;
+
 async function doLaunch() {
+  if (launchInFlight) return;
   const variant = document.getElementById('f-variant').value;
   const vinfo = app.variantLookup[variant] || {};
   const cfg = {
@@ -91,6 +115,9 @@ async function doLaunch() {
   document.getElementById('launch-dialog').close();
   setStatus('Launching...');
 
+  const btn = document.getElementById('btn-do-launch');
+  launchInFlight = true;
+  btn.disabled = true;
   try {
     const result = await fetchJson('/api/pods/launch', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
@@ -100,11 +127,19 @@ async function doLaunch() {
     emit('pod:select', { podId: result.pod_id });
   } catch (e) {
     setStatus(`Launch failed: ${e.message || e}`);
+  } finally {
+    launchInFlight = false;
+    btn.disabled = false;
   }
 }
 
 export function initLaunch() {
   document.getElementById('f-dc').addEventListener('change', onDcChange);
-  document.getElementById('btn-do-launch').addEventListener('click', doLaunch);
+  // The form is method="dialog"; we drive the launch ourselves (async fetch +
+  // controlled close) so prevent the native dialog-close submit from racing it.
+  document.getElementById('launch-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    doLaunch();
+  });
   document.getElementById('btn-launch-cancel').addEventListener('click', () => document.getElementById('launch-dialog').close());
 }

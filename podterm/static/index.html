@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PODTERM</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="/static/vendor/plotly-2.35.2.min.js"></script>
 <link rel="stylesheet" href="/static/css/tokens.css">
 <link rel="stylesheet" href="/static/css/base.css">
 <link rel="stylesheet" href="/static/css/layout.css">
@@ -14,12 +14,12 @@
 
 <header id="topnav">
   <div id="brand"><span class="brand-dot"></span>PODTERM</div>
-  <nav id="tab-bar">
-    <div class="tab active" data-tab="live">Live</div>
-    <div class="tab" data-tab="health">Model Health</div>
-    <div class="tab" data-tab="history">History</div>
-    <div class="tab" data-tab="compare">Compare</div>
-    <div class="tab" data-tab="machines">Machines</div>
+  <nav id="tab-bar" role="tablist" aria-label="Views">
+    <button type="button" class="tab active" role="tab" data-tab="live" aria-selected="true" aria-controls="tab-live">Live</button>
+    <button type="button" class="tab" role="tab" data-tab="health" aria-selected="false" aria-controls="tab-health" tabindex="-1">Model Health</button>
+    <button type="button" class="tab" role="tab" data-tab="history" aria-selected="false" aria-controls="tab-history" tabindex="-1">History</button>
+    <button type="button" class="tab" role="tab" data-tab="compare" aria-selected="false" aria-controls="tab-compare" tabindex="-1">Compare</button>
+    <button type="button" class="tab" role="tab" data-tab="machines" aria-selected="false" aria-controls="tab-machines" tabindex="-1">Machines</button>
   </nav>
   <div id="topnav-right">
     <div id="cluster-pill" class="status-pill"><span class="pill-dot"></span><span id="cluster-pill-text">Connecting…</span></div>
@@ -158,41 +158,43 @@
 <!-- Launch Dialog -->
 <dialog id="launch-dialog">
   <h3>Launch Run</h3>
-  <label>Branch</label>
+  <form id="launch-form" method="dialog">
+  <label for="f-branch">Branch</label>
   <select id="f-branch"></select>
-  <label>Datacenter</label>
+  <label for="f-dc">Datacenter</label>
   <select id="f-dc"></select>
-  <label>GPU</label>
+  <label for="f-gpu">GPU</label>
   <select id="f-gpu"></select>
-  <label>Data Variant</label>
+  <label for="f-variant">Data Variant</label>
   <select id="f-variant"></select>
-  <label>Data shards</label>
+  <label for="f-shards">Data shards</label>
   <input id="f-shards" type="number" value="20" min="1">
   <details>
     <summary>Advanced</summary>
-    <label>Name (optional)</label>
+    <label for="f-name">Name (optional)</label>
     <input id="f-name" placeholder="defaults to branch name">
-    <label>GPU count</label>
+    <label for="f-gpu-count">GPU count</label>
     <input id="f-gpu-count" type="number" value="1" min="1" max="8">
-    <label>Train script</label>
+    <label for="f-train-script">Train script</label>
     <input id="f-train-script" value="train_gpt.py">
-    <label>Profile steps (0 = disabled)</label>
+    <label for="f-profile">Profile steps (0 = disabled)</label>
     <input id="f-profile" type="number" value="0" min="0">
-    <div class="chk-row"><input type="checkbox" id="f-compile-debug"><label style="margin:0">Compile graph debug</label></div>
-    <div class="chk-row"><input type="checkbox" id="f-graph-logs"><label style="margin:0">Graph logs</label></div>
-    <label>Time budget (sec)</label>
+    <div class="chk-row"><input type="checkbox" id="f-compile-debug"><label for="f-compile-debug" style="margin:0">Compile graph debug</label></div>
+    <div class="chk-row"><input type="checkbox" id="f-graph-logs"><label for="f-graph-logs" style="margin:0">Graph logs</label></div>
+    <label for="f-time">Time budget (sec)</label>
     <input id="f-time" type="number" value="600" min="60">
-    <label>Data HF repo</label>
+    <label for="f-data-repo">Data HF repo</label>
     <input id="f-data-repo" value="sysrekt/parameter-golf">
-    <label>Data version (HF revision)</label>
+    <label for="f-data-version">Data version (HF revision)</label>
     <input id="f-data-version" value="main">
-    <label>Redis cache server (ip:port)</label>
+    <label for="f-redis">Redis cache server (ip:port)</label>
     <input id="f-redis" placeholder="e.g. 10.0.0.5:6379">
   </details>
   <div class="btn-row">
-    <button id="btn-do-launch" class="primary">Launch Run</button>
-    <button id="btn-launch-cancel">Cancel</button>
+    <button type="submit" id="btn-do-launch" class="primary">Launch Run</button>
+    <button type="button" id="btn-launch-cancel">Cancel</button>
   </div>
+  </form>
 </dialog>
 
 <!-- Full Config Dialog -->
