@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import threading
 import time
-
-import logging
 
 from pydantic import BaseModel, ConfigDict, Field
 
