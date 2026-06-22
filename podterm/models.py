@@ -9,9 +9,9 @@ from dataclasses import dataclass
 class StepMetric:
     step: int
     total_steps: int
-    train_loss: float
     train_time_ms: int
     step_avg_ms: float
+    train_loss: float | None = None
     val_loss: float | None = None
     val_bpb: float | None = None
 
