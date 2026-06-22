@@ -28,15 +28,6 @@ function formatTokens(value) {
   return Number.isFinite(num) ? `${num.toLocaleString('en-US')} tok/step` : String(value);
 }
 
-// eventd bearer token is persisted in config_json — never show it.
-function redacted(cfg) {
-  const out = {};
-  for (const [k, v] of Object.entries(cfg)) {
-    out[k] = /token|secret|password/i.test(k) ? '••• redacted •••' : v;
-  }
-  return out;
-}
-
 function row(label, value, { copy = null, pending = false } = {}) {
   const div = document.createElement('div');
   div.className = 'cfg-row';
@@ -142,9 +133,11 @@ export function renderConfigPanel(podId) {
 function openConfigDialog() {
   if (!app.activePod) return;
   const state = getPodState(app.activePod);
+  // config_json is sanitized server-side (secrets masked before it leaves the
+  // server), so we render it as-is.
   const cfg = parseConfig(state);
   document.getElementById('config-json').textContent = cfg
-    ? JSON.stringify(redacted(cfg), null, 2)
+    ? JSON.stringify(cfg, null, 2)
     : 'No launch config recorded for this run.';
   document.getElementById('config-dialog').showModal();
 }
