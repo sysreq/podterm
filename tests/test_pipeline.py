@@ -1,3 +1,5 @@
+import asyncio
+
 from podterm import pipeline as pipeline_mod
 from podterm.pipeline import EventPipeline
 
@@ -157,23 +159,198 @@ def test_passthrough_and_lifecycle_events(monkeypatch):
     assert finished == [("pod-1", 7)]
 
 
-def test_snapshot_event_fans_out_and_starts_task(monkeypatch):
+def test_snapshot_event_fans_out_and_tracks_task(monkeypatch):
+    # F8/F9: the `snapshot` SSE goes out immediately; diagnostics run in a tracked
+    # task that fans out the `diagnostic` SSE *on the loop* once handle_snapshot
+    # returns the event payload — the worker thread never calls hub.send.
     sse = FakeSSE()
     pipe = EventPipeline(sse)
-    tasks = []
 
-    def fake_create_task(coro):
-        tasks.append(coro)
-        coro.close()
+    async def fake_handle_snapshot(pod_id, payload):
+        return [{"step": payload["step"], "status": "ok", "final": True, "health": None, "sections": []}]
 
-    monkeypatch.setattr(pipeline_mod.asyncio, "create_task", fake_create_task)
-    monkeypatch.setattr(pipeline_mod.snapshots, "handle_snapshot", lambda pod_id, payload: _noop())
+    monkeypatch.setattr(pipeline_mod.snapshots, "handle_snapshot", fake_handle_snapshot)
 
-    pipe._handle_event("pod-1", {"t": "snapshot", "step": 10, "final": True}, {})
+    async def scenario():
+        pipe._handle_event("pod-1", {"t": "snapshot", "step": 10, "final": True}, {})
+        # The snapshot task must be tracked (not fire-and-forget) so it isn't
+        # GC'd and shutdown can await it.
+        assert len(pipe._snapshot_tasks) == 1
+        await asyncio.gather(*pipe._snapshot_tasks)
 
-    assert sse.events == [("pod-1", "snapshot", {"step": 10, "final": True})]
-    assert len(tasks) == 1
+    asyncio.run(scenario())
+
+    assert ("pod-1", "snapshot", {"step": 10, "final": True}) in sse.events
+    assert ("pod-1", "diagnostic", {
+        "step": 10, "status": "ok", "final": True, "health": None, "sections": [],
+    }) in sse.events
+    # Done-callback discards the finished task from the tracking set.
+    assert pipe._snapshot_tasks == set()
 
 
-async def _noop():
-    return None
+def test_snapshot_empty_result_skips_diagnostic_sse(monkeypatch):
+    # When handle_snapshot returns no events (diagnostics disabled / coalesced
+    # away because another task holds the lock), no `diagnostic` SSE is emitted.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+
+    async def fake_handle_snapshot(pod_id, payload):
+        return []
+
+    monkeypatch.setattr(pipeline_mod.snapshots, "handle_snapshot", fake_handle_snapshot)
+
+    async def scenario():
+        pipe._handle_event("pod-1", {"t": "snapshot", "step": 5, "final": False}, {})
+        await asyncio.gather(*pipe._snapshot_tasks)
+
+    asyncio.run(scenario())
+
+    assert ("pod-1", "snapshot", {"step": 5, "final": False}) in sse.events
+    assert not any(event == "diagnostic" for _, event, _ in sse.events)
+
+
+def test_snapshot_fans_out_every_coalesced_diagnostic(monkeypatch):
+    # F8/F9: when several pending snapshots are processed under one lock,
+    # every processed snapshot fans out its own `diagnostic` SSE (matching the
+    # old per-snapshot hub.send), not just the last one.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+
+    async def fake_handle_snapshot(pod_id, payload):
+        return [
+            {"step": 10, "status": "ok", "final": False, "health": None, "sections": []},
+            {"step": 20, "status": "warn", "final": True, "health": None, "sections": []},
+        ]
+
+    monkeypatch.setattr(pipeline_mod.snapshots, "handle_snapshot", fake_handle_snapshot)
+
+    async def scenario():
+        pipe._handle_event("pod-1", {"t": "snapshot", "step": 20, "final": True}, {})
+        await asyncio.gather(*pipe._snapshot_tasks)
+
+    asyncio.run(scenario())
+
+    diag_steps = [p["step"] for _, ev, p in sse.events if ev == "diagnostic"]
+    assert diag_steps == [10, 20]
+
+
+def test_metric_train_loss_zero_is_preserved():
+    # F7: a valid 0.0 train_loss must survive (not be coerced to a sentinel),
+    # and must be distinguishable from a genuinely-missing key (which defaults).
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+    metrics = {}
+
+    pipe._handle_event("pod-1", {"t": "metric", "step": 1, "train_loss": 0.0}, metrics)
+    assert metrics["pod-1"][0].train_loss == 0.0
+    assert metrics["pod-1"][0].train_loss is not None
+
+    pipe._handle_event("pod-1", {"t": "metric", "step": 2}, metrics)
+    assert metrics["pod-1"][1].train_loss == 0.0
+
+
+def test_flush_metrics_keeps_batch_buffered_on_failure(monkeypatch):
+    # F4: a failed db.add_metrics_batch must NOT discard the batch — it stays
+    # buffered for bounded retry rather than being silently lost.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+    calls = []
+
+    def boom(pid, metrics):
+        calls.append(pid)
+        raise RuntimeError("locked")
+
+    monkeypatch.setattr(pipeline_mod.db, "add_metrics_batch", boom)
+
+    buffer = {"pod-1": [object()]}
+    pipe._flush_metrics(buffer)
+
+    # Batch is retained for retry, failure counter incremented.
+    assert "pod-1" in buffer
+    assert pipe._metric_flush_failures["pod-1"] == 1
+    assert calls == ["pod-1"]
+
+
+def test_flush_metrics_drops_batch_after_retry_cap(monkeypatch):
+    # F4: bounded retry — after MAX_METRIC_FLUSH_RETRIES the batch is dropped so
+    # a permanent failure can't grow the buffer without limit.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+
+    def boom(pid, metrics):
+        raise RuntimeError("locked")
+
+    monkeypatch.setattr(pipeline_mod.db, "add_metrics_batch", boom)
+
+    buffer = {"pod-1": [object()]}
+    for _ in range(pipeline_mod.MAX_METRIC_FLUSH_RETRIES):
+        pipe._flush_metrics(buffer)
+
+    assert "pod-1" not in buffer
+    assert "pod-1" not in pipe._metric_flush_failures
+
+
+def test_starting_training_resets_flush_failure_counter():
+    # A run restart ("Starting Training") must drop the stale per-pod retry
+    # counter so the new run gets a fresh flush-retry budget on the same pod_id.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+    pipe._metric_flush_failures["pod-1"] = 7
+    metrics = {"pod-1": [object()]}
+
+    pipe._handle_event("pod-1", {"t": "phase", "phase": "Starting Training"}, metrics)
+
+    assert "pod-1" not in metrics
+    assert "pod-1" not in pipe._metric_flush_failures
+
+
+def test_flush_metrics_clears_batch_only_after_commit(monkeypatch):
+    # F4: a successful write removes the batch and resets the failure counter.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+    written = []
+    monkeypatch.setattr(pipeline_mod.db, "add_metrics_batch", lambda pid, m: written.append(pid))
+
+    buffer = {"pod-1": [object()], "pod-2": [object()]}
+    pipe._flush_metrics(buffer)
+
+    assert buffer == {}
+    assert sorted(written) == ["pod-1", "pod-2"]
+
+
+def test_drain_loop_survives_a_bad_event(monkeypatch):
+    # F3: a handler raising on one event must not kill the drain loop; later
+    # events still process.
+    sse = FakeSSE()
+    pipe = EventPipeline(sse)
+
+    real_handle_metric = pipe._handle_metric
+
+    def flaky_metric(pod_id, payload, metrics_buffer):
+        if payload.get("step") == 1:
+            raise ValueError("bad event")
+        return real_handle_metric(pod_id, payload, metrics_buffer)
+
+    monkeypatch.setattr(pipe, "_handle_metric", flaky_metric)
+
+    pipe.queue.put(("pod-1", "event", {"t": "metric", "step": 1, "train_loss": 1.0}))
+    pipe.queue.put(("pod-1", "event", {"t": "metric", "step": 2, "train_loss": 2.0}))
+
+    async def scenario():
+        task = asyncio.create_task(pipe.drain_loop())
+        # Give the loop time to drain both items (it sleeps 0.05s per tick).
+        for _ in range(20):
+            await asyncio.sleep(0.02)
+            if any(p.get("step") == 2 for _, ev, p in sse.events if ev == "metric"):
+                break
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(scenario())
+
+    steps = [p["step"] for _, ev, p in sse.events if ev == "metric"]
+    # The bad event (step 1) was swallowed; the good event (step 2) still fanned out.
+    assert 2 in steps

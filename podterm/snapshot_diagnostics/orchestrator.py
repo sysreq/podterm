@@ -6,7 +6,6 @@ import logging
 
 from podterm import db
 from podterm.config import DEFAULT_DATA_VARIANT, diagnostics_enabled
-from podterm.sse import hub
 
 from . import state
 from .client import base_url, download_snapshot, request
@@ -15,23 +14,39 @@ from .runner import run_diagnostics
 log = logging.getLogger("podterm.snapshots")
 
 
-async def handle_snapshot(pod_id: str, payload: dict) -> None:
+async def handle_snapshot(pod_id: str, payload: dict) -> list[dict]:
+    """Run diagnostics for the pending snapshot(s) on this pod.
+
+    Per-pod processing is serialized + coalesced to the newest pending snapshot.
+    Returns one `diagnostic` SSE event payload per snapshot processed (empty when
+    nothing was processed / diagnostics are disabled / coalesced into another
+    holder of the lock). The caller sends them on the event loop — the worker
+    thread must not touch asyncio queues.
+    """
     if not diagnostics_enabled():
-        return
+        return []
     state._pending[pod_id] = payload
     lock = state._locks.setdefault(pod_id, asyncio.Lock())
     if lock.locked():
-        return
+        return []
+    events: list[dict] = []
     async with lock:
         while pod_id in state._pending:
             p = state._pending.pop(pod_id)
             try:
-                await asyncio.to_thread(process_snapshot, pod_id, p)
+                events.append(await asyncio.to_thread(process_snapshot, pod_id, p))
             except Exception:
                 log.exception("snapshot diagnostics failed pod=%s step=%s", pod_id, p.get("step"))
+    return events
 
 
-def process_snapshot(pod_id: str, payload: dict) -> None:
+def process_snapshot(pod_id: str, payload: dict) -> dict:
+    """Download + run diagnostics + persist; return the `diagnostic` event dict.
+
+    Runs in a worker thread (via asyncio.to_thread): it must NOT touch the
+    asyncio SSE queues. The event payload is returned to the event loop, which
+    does the fan-out.
+    """
     step = int(payload.get("step", 0))
     run = db.get_run(pod_id) or {}
     cfg = parse_config(run.get("config_json"))
@@ -46,12 +61,12 @@ def process_snapshot(pod_id: str, payload: dict) -> None:
     reconcile_bpb(pod_id, step, diag)
 
     db.add_diagnostics(pod_id, step, status, json.dumps(diag))
-    hub.send(pod_id, "diagnostic", {
+    log.info("diagnostics done pod=%s step=%s status=%s", pod_id, step, status)
+    return {
         "step": step, "status": status, "final": bool(payload.get("final")),
         "health": diag.get("health"),
         "sections": [s.get("name") for s in diag.get("sections", [])],
-    })
-    log.info("diagnostics done pod=%s step=%s status=%s", pod_id, step, status)
+    }
 
 
 def parse_config(config_json: str | None) -> dict:
