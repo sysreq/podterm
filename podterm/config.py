@@ -2,12 +2,74 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
 
 
+log = logging.getLogger("podterm.config")
+
 _FALSY = {"0", "false", "no", "off", ""}
+
+
+def env_int(
+    name: str,
+    default: int,
+    environ: Mapping[str, str] | None = None,
+    *,
+    minimum: int | None = None,
+) -> int:
+    """Parse an int env var, falling back to ``default`` on any bad/out-of-range value.
+
+    Never raises: a non-numeric value, or one below ``minimum`` (when given), logs a
+    warning and yields ``default`` so a stray env value can't crash import or starve a
+    loop. Pass ``minimum=1`` for intervals/delays that must stay positive (a value of 0
+    would otherwise create a busy zero-delay loop).
+    """
+    env = environ or os.environ
+    raw = env.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        log.warning("invalid int for %s=%r; using default %r", name, raw, default)
+        return default
+    if minimum is not None and value < minimum:
+        log.warning("%s=%r below minimum %d; using default %r", name, value, minimum, default)
+        return default
+    return value
+
+
+def env_float(
+    name: str,
+    default: float,
+    environ: Mapping[str, str] | None = None,
+    *,
+    minimum: float | None = None,
+) -> float:
+    """Parse a float env var, falling back to ``default`` on any bad/out-of-range value.
+
+    Never raises (see :func:`env_int`). Pass ``minimum`` (e.g. a small positive epsilon)
+    for refresh/poll intervals so a 0 or negative value can't create a zero-delay loop.
+    """
+    env = environ or os.environ
+    raw = env.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        log.warning("invalid float for %s=%r; using default %r", name, raw, default)
+        return default
+    if value != value:  # NaN
+        log.warning("%s=%r is NaN; using default %r", name, raw, default)
+        return default
+    if minimum is not None and value < minimum:
+        log.warning("%s=%r below minimum %r; using default %r", name, value, minimum, default)
+        return default
+    return value
 
 
 def boot_progress_enabled(environ: Mapping[str, str] | None = None) -> bool:
@@ -122,10 +184,14 @@ def diag_caps(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     cheap; override any of them in the env for a fuller sweep.
     """
     env = environ or os.environ
+    # Forwarded as env strings to the diagnostics subprocess, but validated here so a bad
+    # value (non-numeric / negative batch count) falls back to the documented default
+    # instead of blowing up the subprocess's own parsing. minimum=0 keeps counts >= 0
+    # (0 = off for sampling); batch counts are also allowed to be 0.
     return {
-        "DIAG_MAX_BATCHES": env.get("DIAG_MAX_BATCHES", "2"),
-        "DIAG_ENTROPY_BATCHES": env.get("DIAG_ENTROPY_BATCHES", "1"),
-        "DIAG_SAMPLE_TOKENS": env.get("DIAG_SAMPLE_TOKENS", "0"),
+        "DIAG_MAX_BATCHES": str(env_int("DIAG_MAX_BATCHES", 2, env, minimum=0)),
+        "DIAG_ENTROPY_BATCHES": str(env_int("DIAG_ENTROPY_BATCHES", 1, env, minimum=0)),
+        "DIAG_SAMPLE_TOKENS": str(env_int("DIAG_SAMPLE_TOKENS", 0, env, minimum=0)),
     }
 
 # ---------------------------------------------------------------------------

@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import urllib.request
+from pathlib import Path
 
-from podterm.config import DEFAULT_BRANCH, DEFAULT_DATA_REPO_ID, DEFAULT_DATA_VARIANT, DEFAULT_DATA_VERSION
+from podterm.config import (
+    DEFAULT_BRANCH,
+    DEFAULT_DATA_REPO_ID,
+    DEFAULT_DATA_VARIANT,
+    DEFAULT_DATA_VERSION,
+    gpt_golf_dir,
+)
+
+log = logging.getLogger("podterm.helpers")
 
 # ---------------------------------------------------------------------------
 # SSH key
@@ -38,29 +48,45 @@ def get_ssh_key_path() -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def get_git_branches() -> list[str]:
+def get_git_branches(repo_dir: Path | None = None) -> list[str]:
+    """List branches of the repo whose code actually gets trained.
+
+    The launched images train the sibling gpt-golf checkout (CLAUDE.md), so branches
+    come from ``gpt_golf_dir()`` — not PodTerm's CWD. A non-zero git exit (no repo,
+    git missing, etc.) falls back to ``[DEFAULT_BRANCH]`` rather than treating empty
+    stdout as a valid empty branch list. ``repo_dir`` is overridable for tests.
+    """
+    repo = repo_dir if repo_dir is not None else gpt_golf_dir()
     try:
         result = subprocess.run(
-            ["git", "branch", "-a", "--format=%(refname:short)"],
+            ["git", "-C", str(repo), "for-each-ref", "--format=%(refname:short)",
+             "refs/heads", "refs/remotes"],
             capture_output=True, text=True, timeout=5,
         )
-        seen: set[str] = set()
-        branches: list[str] = []
-        for b in result.stdout.strip().splitlines():
-            b = b.strip()
-            if b.startswith("origin/"):
-                b = b[len("origin/"):]
-            if b in ("HEAD", "") or b in seen:
-                continue
-            seen.add(b)
-            branches.append(b)
-        for name in reversed(["trunk", "main", "master"]):
-            if name in branches:
-                branches.remove(name)
-                branches.insert(0, name)
-        return branches or [DEFAULT_BRANCH]
     except Exception:
+        log.warning("git branch enumeration failed for %s", repo, exc_info=True)
         return [DEFAULT_BRANCH]
+    if result.returncode != 0:
+        log.warning(
+            "git for-each-ref in %s exited %d: %s",
+            repo, result.returncode, (result.stderr or "").strip(),
+        )
+        return [DEFAULT_BRANCH]
+    seen: set[str] = set()
+    branches: list[str] = []
+    for b in result.stdout.strip().splitlines():
+        b = b.strip()
+        if b.startswith("origin/"):
+            b = b[len("origin/"):]
+        if b in ("HEAD", "") or b in seen:
+            continue
+        seen.add(b)
+        branches.append(b)
+    for name in reversed(["trunk", "main", "master"]):
+        if name in branches:
+            branches.remove(name)
+            branches.insert(0, name)
+    return branches or [DEFAULT_BRANCH]
 
 
 # ---------------------------------------------------------------------------
