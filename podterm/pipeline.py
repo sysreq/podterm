@@ -73,13 +73,13 @@ class EventPipeline:
     # -- event handlers ----------------------------------------------------
 
     def _handle_metric(self, pod_id: str, payload: dict, metrics_buffer: dict[str, list[StepMetric]]) -> None:
-        # Preserve a valid 0.0 rather than coercing it to a missing-sentinel:
-        # `payload.get("train_loss") or 0.0` would discard a genuine zero loss
-        # and conflate it with the key being absent. Only default when the key
-        # is truly missing (the DB layer stores 0.0 as 0.0).
+        # Absent train_loss stays None — never a 0.0 sentinel. The producer emits a
+        # val-only metric at the SAME step as the final real train metric, and the DB
+        # upsert merges per-step rows with COALESCE, which preserves the prior value
+        # only when the incoming one is NULL (not 0.0). Coercing absent->0.0 would let
+        # that val-only event clobber the real per-step loss on merge. A genuine 0.0
+        # (never produced by a real cross-entropy loss) is preserved as-is.
         train_loss = payload.get("train_loss")
-        if train_loss is None:
-            train_loss = 0.0
         event = StepMetric(
             step=payload.get("step", 0), total_steps=payload.get("total_steps", 0),
             train_loss=train_loss,

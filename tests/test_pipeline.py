@@ -236,7 +236,8 @@ def test_snapshot_fans_out_every_coalesced_diagnostic(monkeypatch):
 
 def test_metric_train_loss_zero_is_preserved():
     # F7: a valid 0.0 train_loss must survive (not be coerced to a sentinel),
-    # and must be distinguishable from a genuinely-missing key (which defaults).
+    # and must be distinguishable from a genuinely-missing key, which stays None
+    # so the DB's COALESCE upsert can't clobber a real per-step loss with 0.0.
     sse = FakeSSE()
     pipe = EventPipeline(sse)
     metrics = {}
@@ -246,7 +247,7 @@ def test_metric_train_loss_zero_is_preserved():
     assert metrics["pod-1"][0].train_loss is not None
 
     pipe._handle_event("pod-1", {"t": "metric", "step": 2}, metrics)
-    assert metrics["pod-1"][1].train_loss == 0.0
+    assert metrics["pod-1"][1].train_loss is None
 
 
 def test_flush_metrics_keeps_batch_buffered_on_failure(monkeypatch):
