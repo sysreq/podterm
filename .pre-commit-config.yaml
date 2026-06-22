@@ -1,0 +1,28 @@
+# Pre-commit hooks mirroring CI (.github/workflows/ci.yml).
+# Install with:  uv run pre-commit install
+# Run on all files:  uv run pre-commit run --all-files
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.0
+    hooks:
+      # Lint with the project's [tool.ruff] config (does not reformat — the
+      # ruff-format hook is intentionally omitted; see [tool.ruff] notes).
+      - id: ruff-check
+
+  - repo: local
+    hooks:
+      # Python tests — same command CI runs.
+      - id: pytest
+        name: pytest
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      # Frontend tests — same command CI runs.
+      - id: node-test
+        name: node --test (frontend)
+        entry: node --test podterm/static/js/derive.test.mjs podterm/static/js/diagnostics.test.mjs
+        language: system
+        pass_filenames: false
+        files: ^podterm/static/js/.*\.(m?js)$
