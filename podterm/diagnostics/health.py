@@ -13,6 +13,8 @@ stages_forward.py). `optimizer`-dependent metrics (uwr, adam) are intentionally 
 suite runs on a bare checkpoint with optimizer=None (__main__.py), so that stage is always skipped.
 """
 
+import math
+
 # kind: 'hi' = higher is worse, 'lo' = lower is worse, 'range' = outside band is worse,
 #       'info' = trend-only, no verdict. bad=None means warn is the worst level.
 HEADLINE = [
@@ -61,7 +63,10 @@ _VERDICT = ['ok', 'warn', 'error']
 
 
 def _is_num(v):
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+    # Reject bools (they subclass int) and non-finite floats (NaN/inf): because every comparison
+    # against NaN is False, a NaN leaking into classify() would skip both the bad and warn checks
+    # and masquerade as 'good'. Treating it as non-numeric makes the metric resolve to None/unavailable.
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
 
 
 def _collect(section, row, key):
@@ -76,7 +81,14 @@ def _collect(section, row, key):
         elif isinstance(v, list):
             out.extend(float(x) for x in v if _is_num(x))
 
-    targets = [rows[row]] if row is not None else list(rows.values())
+    # rows.get(row): a known section can be present yet missing its expected row (producer schema
+    # drift / partial run). A missing row contributes no targets -> _reduce([]) -> resolve() returns
+    # None, matching resolve()'s contract. Direct rows[row] would KeyError instead.
+    if row is not None:
+        rd = rows.get(row)
+        targets = [rd] if rd is not None else []
+    else:
+        targets = list(rows.values())
     for rd in targets:
         if not isinstance(rd, dict):
             continue
@@ -142,10 +154,13 @@ def resolve(diag, entry):
 
 
 def compute(diag):
-    """-> {overall: ok|warn|error, headline: [...], counts: {...}}.
+    """-> {overall: ok|warn|error, headline: [...], counts: {...}, completeness: {...}}.
 
     overall is the worst of every section's execution status and every headline metric's band, so a
-    clean-running suite with a sick metric still reads 'error'/'warn'."""
+    clean-running suite with a sick metric still reads 'error'/'warn'. Skipped/unavailable values keep
+    zero severity by design (missing != sick), so a weights-only report still reads 'ok'; the additive
+    `completeness` block (evaluated vs total verdict-bearing metrics) lets callers flag a mostly-'na'
+    report instead of misreading a sparse green as a clean bill of health."""
     sev = 0
     for s in diag.get('sections', []):
         sev = max(sev, _SEV.get(s.get('status', 'ok'), 0))
@@ -161,4 +176,16 @@ def compute(diag):
                              unit=entry['unit'], band=band, group=entry['group'], tier=entry['tier'],
                              thresholds=dict(entry['band']), why=entry.get('why')))
 
-    return dict(overall=_VERDICT[sev], headline=headline, counts=counts)
+    # Completeness over verdict-bearing metrics only (info/trend-only entries carry no verdict, so
+    # their availability says nothing about health coverage). Additive: never changes overall/sev.
+    verdict_total = sum(1 for e in HEADLINE if e['band'].get('kind') != 'info')
+    verdict_evaluated = sum(1 for h in headline
+                            if h['thresholds'].get('kind') != 'info' and h['band'] != 'na')
+    completeness = dict(
+        evaluated=verdict_evaluated,
+        total=verdict_total,
+        fraction=(verdict_evaluated / verdict_total) if verdict_total else 0.0,
+    )
+
+    return dict(overall=_VERDICT[sev], headline=headline, counts=counts,
+                completeness=completeness)
