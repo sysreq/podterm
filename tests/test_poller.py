@@ -1,7 +1,7 @@
 import json
 import queue
 
-from podterm.eventing import poller as poller_mod
+from podterm.eventing import startup as startup_mod
 from podterm.eventing.poller import PodPoller
 
 
@@ -33,9 +33,8 @@ def queued(poller: PodPoller):
 
 def test_wait_for_running_returns_on_running(monkeypatch):
     poller = make_poller()
-    monkeypatch.setattr(poller_mod.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(
-        poller_mod,
+        startup_mod,
         "api_get_pod",
         lambda pod_id: {"desiredStatus": "RUNNING"},
     )
@@ -46,9 +45,8 @@ def test_wait_for_running_returns_on_running(monkeypatch):
 
 def test_wait_for_running_logs_terminal_status(monkeypatch):
     poller = make_poller()
-    monkeypatch.setattr(poller_mod.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(
-        poller_mod,
+        startup_mod,
         "api_get_pod",
         lambda pod_id: {"desiredStatus": "EXITED"},
     )
