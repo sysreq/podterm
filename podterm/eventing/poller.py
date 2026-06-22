@@ -8,6 +8,8 @@ from podterm.config import EVENTD_PORT
 from podterm.eventing.client import EventdClient
 from podterm.eventing.startup import PodStartup
 from podterm.eventing.streams import EventStream, LogTailer, LOG_TAIL_BYTES
+from podterm.eventing.util import is_terminal_status, pod_status
+from podterm.runpod.api import api_get_pod_lookup
 
 LogQueue = queue.Queue[tuple[str, str, dict]]
 
@@ -63,7 +65,21 @@ class PodPoller(threading.Thread):
         self.log_queue.put((self.pod_id, "event", payload))
 
     def _check_pod_gone(self) -> bool:
-        return self._startup.pod_gone()
+        """Whether the pod is *definitively* gone — used to finalize the run.
+
+        Only a confirmed absence (RunPod 404) or a terminal pod status counts.
+        A transient CLI/network failure reports `unavailable`, which we treat as
+        "still here": EventStream requires N consecutive confirmations before
+        emitting `pod_gone`, and a single outage must never finalize a live run.
+        """
+        if self.skip_pod_checks:
+            return False
+        result = api_get_pod_lookup(self.pod_id)
+        if result.is_definitively_gone:
+            return True
+        if result.pod is not None and is_terminal_status(pod_status(result.pod)):
+            return True
+        return False
 
     def _boot_tick(self) -> None:
         """Pull machine logs once; emit host lines + a pull snapshot on change."""
