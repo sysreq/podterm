@@ -32,3 +32,9 @@ REGISTRY=ghcr.io/you ./build.sh --push
 Base is built first; train and cache `FROM` it. The image names are also referenced
 in PodTerm (`config.DEFAULT_IMAGE`, `config.TEMPLATE_NAME`, and the cache-pod detector
 `runpod/cli.detect_redis_server`) — keep them in sync if you rename.
+
+### zstd layer compression on push
+
+`--push` recompresses layers to **zstd** via [skopeo](https://github.com/containers/skopeo) (`copy --dest-compress-format zstd`, daemon → registry) instead of Docker's default gzip — smaller blobs and faster decompression mean quicker cold pulls on ephemeral pods. Requires `skopeo` (`apt install skopeo`); without it `build.sh` falls back to `docker push` (gzip). Compress harder with `ZSTD_LEVEL=19` (smaller, slower push). Uses your existing `docker login` creds.
+
+> Compatibility: the RunPod host puller must understand zstd OCI layers (modern Docker/containerd do). If a pod ever fails to pull, push that image with plain `docker push` to fall back to gzip.
