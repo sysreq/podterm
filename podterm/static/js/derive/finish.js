@@ -9,6 +9,20 @@ import { throughputTps, lossDescentRatePerMs, timeToReachLoss, smoothCurrentLoss
 
 export const TIE_LOSS = 0.001; // |finish-loss margin| below this reads as too-close-to-call
 
+// The loss curve decelerates (convex), so the finish projection fits loss vs
+// ln(time) — roughly linear across a training run — and extrapolates that to the
+// budget. A linear-in-*time* fit of the steep early descent shoots well below zero
+// (clamping to ~0) and makes a clearly-behind run look like it finishes near 0.
+//
+// Fit only the most recent fraction of elapsed time so the steep launch transient
+// is excluded and the slope reflects the current (flattening) convergence regime,
+// not the early plunge.
+const RECENT_TREND_FRACTION = 0.5;
+// Don't declare an ahead/behind finish verdict until this fraction of the budget has
+// elapsed: before then we'd extrapolate across most of the run from a still-steep
+// curve, which isn't trustworthy. The sidebar still shows current standing meanwhile.
+export const MIN_PROJECTION_FRACTION = 0.2;
+
 // Interpolate train_loss at a target wall-clock time across a run's samples.
 // Strictly an interpolator: null once the target is past the last valid sample
 // (callers extrapolate). Before the first valid sample returns it flagged low.
@@ -34,18 +48,53 @@ export function lossAtTime(samples, targetTimeMs) {
   return null; // target is beyond the last valid sample
 }
 
+// Least-squares line of train_loss vs ln(train_time_ms) over the most recent
+// `frac` of elapsed time. ln-time linearises the decelerating loss curve, and the
+// recent-fraction window drops the steep launch transient, so the slope reflects
+// the current convergence regime. Returns { slope, intercept, n } (slope in
+// loss-per-ln-ms, negative while improving) or null with < 2 usable points.
+// Fitting the window — not the latest step — also smooths per-step variance, so a
+// single lucky/unlucky step can't swing the finish projection.
+function recentLogTimeTrend(samples, frac = RECENT_TREND_FRACTION) {
+  let latestTime = null;
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i];
+    if (s && s.train_loss > 0 && s.train_time_ms > 0) { latestTime = s.train_time_ms; break; }
+  }
+  if (latestTime == null) return null;
+  const threshold = frac * latestTime;
+  let n = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (const s of samples) {
+    if (!s || !(s.train_loss > 0) || !(s.train_time_ms > 0) || s.train_time_ms < threshold) continue;
+    const x = Math.log(s.train_time_ms), y = s.train_loss;
+    n += 1; sx += x; sy += y; sxx += x * x; sxy += x * y;
+  }
+  if (n < 2) return null;
+  const denom = n * sxx - sx * sx;
+  if (!(Math.abs(denom) > 0)) return null;
+  const slope = (n * sxy - sx * sy) / denom;
+  return { slope, intercept: (sy - slope * sx) / n, n };
+}
+
 // Estimate train_loss at the finish horizon. Interpolate when the series brackets
-// the horizon; otherwise extrapolate from the latest valid sample at the recent
-// descent rate. Returns { value, method, confidence, atTimeMs, ratePerMs };
-// value is null ('none') when there's no data or no usable trend to extrapolate.
+// the horizon; otherwise extrapolate the recent ln(time) trend to the horizon —
+// decelerating like the real curve, fit over the recent window (never anchored on
+// the single latest noisy step). Returns { value, method, confidence, atTimeMs,
+// ratePerMs }; value is null ('none') when there's no data or no usable trend.
 export function estimateFinishLoss(samples, finishBudgetMs, windowSteps = QUALITY_WINDOW_STEPS) {
   const none = { value: null, method: 'none', confidence: null, atTimeMs: null, ratePerMs: null };
-  if (!samples || !samples.length || finishBudgetMs == null) return none;
+  if (!samples || !samples.length || finishBudgetMs == null || !(finishBudgetMs > 0)) return none;
 
   const interp = lossAtTime(samples, finishBudgetMs);
   if (interp) {
     return { value: interp.value, method: 'interp', confidence: interp.confidence, atTimeMs: interp.atTimeMs, ratePerMs: null };
   }
+  const trend = recentLogTimeTrend(samples);
+  if (trend) {
+    const projected = Math.max(0, trend.intercept + trend.slope * Math.log(finishBudgetMs));
+    return { value: projected, method: 'trend', confidence: 'low', atTimeMs: finishBudgetMs, ratePerMs: null };
+  }
+  // Too few points to fit a trend: hold the latest sample at the recent descent rate.
   let latest = null;
   for (let i = samples.length - 1; i >= 0; i--) {
     const s = samples[i];
@@ -86,6 +135,14 @@ export function finishRace({
   const currentFinishLoss = estimateFinishLoss(activeSamples, currentFinishBudgetMs).value;
   const baselineFinishLoss = estimateFinishLoss(baselineSamples, baselineFinishBudgetMs).value;
   if (currentFinishLoss == null || baselineFinishLoss == null) {
+    return { ...base, state: 'unknown', currentFinishLoss, baselineFinishLoss };
+  }
+  // Too early / degenerate to call: before MIN_PROJECTION_FRACTION of the budget the
+  // projection extrapolates across most of the run, and a clamp to ≤0 means the steep
+  // curve overshot. Either way report 'unknown' rather than a confident, likely-wrong
+  // verdict — the curve hasn't settled enough to know who finishes lower.
+  const elapsedFrac = currentFinishBudgetMs > 0 ? currentTime / currentFinishBudgetMs : 1;
+  if (currentFinishLoss <= 0 || elapsedFrac < MIN_PROJECTION_FRACTION) {
     return { ...base, state: 'unknown', currentFinishLoss, baselineFinishLoss };
   }
 

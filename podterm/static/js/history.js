@@ -50,6 +50,7 @@ export function toggleRun(runId, checked) {
 export function clearSelection() {
   app.selectedRuns.clear();
   document.getElementById('selection-count').textContent = '0 selected';
+  document.getElementById('history-filter').value = '';
   renderHistoryTable();
 }
 

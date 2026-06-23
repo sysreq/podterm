@@ -1,7 +1,7 @@
 // Entry module: init, tab routing, pod polling, action wiring.
 import { app, on, dropPodState, hydrateFromDb } from './state.js';
 import { reconcileStreams, markPodActive } from './state/stream.js';
-import { renderRunList, initRunList } from './runlist.js';
+import { renderRunList, renderRecentRuns, initRunList } from './runlist.js';
 import { renderLiveView, initLive } from './live.js';
 import { loadHistory, clearSelection, initHistory } from './history.js';
 import { compareSelected, initCompare } from './compare.js';
@@ -110,13 +110,27 @@ async function refreshPods() {
   }
 }
 
+// Pull the historic run list (for the sidebar RECENT RUNS) alongside the pods.
+async function refreshRecentRuns() {
+  try { app.historyRuns = await fetchJson('/api/runs'); } catch { return; }
+  renderRecentRuns(selectPod);
+}
+
 function selectPod(podId) {
   app.activePod = podId;
   markPodActive(podId); // protect it from LRU eviction
   syncStreams();        // ensure the active pod has a stream, evicting a background one if at cap
   renderRunList(selectPod);
-  switchTab('live');
-  renderLiveView(podId);
+  renderRecentRuns(selectPod);
+  // Keep the user where they are when inspecting a run's Model Health; otherwise
+  // the active-run flow lands on Live as before. Picking a past run from the
+  // Health tab loads its DB-backed diagnostics without yanking to Live.
+  if (document.getElementById('tab-health').classList.contains('active')) {
+    switchTab('health');
+  } else {
+    switchTab('live');
+    renderLiveView(podId);
+  }
 }
 
 async function stopPod() {
@@ -179,8 +193,9 @@ function init() {
   initLaunch();
 
   refreshPods();
+  refreshRecentRuns();
   refreshCompileCache();
-  setInterval(() => { refreshPods(); refreshCompileCache(); }, 15000);
+  setInterval(() => { refreshPods(); refreshRecentRuns(); refreshCompileCache(); }, 15000);
 }
 
 init();

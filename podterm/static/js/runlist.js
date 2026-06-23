@@ -81,6 +81,33 @@ export function updateRunCard(podId) {
   }
 }
 
+// Sidebar RECENT RUNS: historic/DB runs not already shown under ACTIVE RUNS, so a
+// past run (e.g. to inspect its Model Health) is selectable the same way live ones
+// are. Reads app.historyRuns (refreshed alongside the pod list). onSelect mirrors
+// the active-run cards — it routes through the same selection flow.
+export function renderRecentRuns(onSelect) {
+  const el = document.getElementById('recent-run-list');
+  if (!el) return;
+  const activeIds = new Set(app.pods.map((p) => p.id));
+  const runs = (app.historyRuns || []).filter((r) => r && r.run_id && !activeIds.has(r.run_id)).slice(0, 8);
+  el.innerHTML = '';
+  if (!runs.length) {
+    el.innerHTML = '<div class="run-empty">No past runs yet.</div>';
+    return;
+  }
+  for (const r of runs) {
+    const card = document.createElement('div');
+    card.className = 'recent-run' + (r.run_id === app.activePod ? ' active' : '');
+    card.dataset.runId = r.run_id;
+    card.innerHTML = '<span class="recent-run-name"></span><span class="recent-run-bpb"></span>';
+    card.querySelector('.recent-run-name').textContent = (r.pod_name || r.run_id).slice(0, 24);
+    card.querySelector('.recent-run-bpb').textContent = r.best_val_bpb != null ? r.best_val_bpb.toFixed(3) : '';
+    card.title = `${r.pod_name || r.run_id} · ${(r.started_at || '').slice(0, 16).replace('T', ' ')}`;
+    card.addEventListener('click', () => onSelect(r.run_id));
+    el.appendChild(card);
+  }
+}
+
 export function initRunList() {
   on('pod:metric', ({ podId }) => updateRunCard(podId));
   on('pod:hydrated', ({ podId }) => updateRunCard(podId));

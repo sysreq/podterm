@@ -10,6 +10,10 @@ export const diagState = {
   history: [],
   baselineHistory: [],
   baselineFetchedFor: null,
+  // Step + timestamp of the most recently *appended* snapshot — drives the
+  // transient "updated" tag on expanded deep-dive sections.
+  lastUpdateStep: null,
+  lastUpdateTs: 0,
   view: {
     selectedStep: null,
     mode: 'summary',
@@ -17,6 +21,7 @@ export const diagState = {
     onlyProblems: false,
     includeUnavailable: false,
     diffMode: 'previous',
+    openSections: null, // Set<string> of expanded section names; null = seed from severity defaults
   },
 };
 
@@ -31,7 +36,10 @@ export function initDiagnostics() {
     diagState.history = [];
     diagState.baselineHistory = [];
     diagState.baselineFetchedFor = null;
+    diagState.lastUpdateStep = null;
+    diagState.lastUpdateTs = 0;
     diagState.view.selectedStep = null;
+    diagState.view.openSections = null;
     if (healthTabVisible()) renderHealthTab();
   });
 }
@@ -47,8 +55,11 @@ export function openHealthTab(podId) {
     diagState.history = [];
     diagState.baselineHistory = [];
     diagState.baselineFetchedFor = null;
+    diagState.lastUpdateStep = null;
+    diagState.lastUpdateTs = 0;
     diagState.view.selectedStep = null;
     diagState.view.mode = 'summary';
+    diagState.view.openSections = null;
   }
   renderHealthTab();
   if (podId) loadDiagnostics(podId);
@@ -61,6 +72,14 @@ async function loadDiagnostics(runId) {
   try { raw = await fetchJson(`/api/runs/${runId}/diagnostics`); } catch { return; }
   if (app.activePod !== runId) return;
   const valid = (Array.isArray(raw) ? raw : []).filter((h) => h && h.diag);
+  // A genuinely new snapshot (later step than what we had) marks an "updated" pulse
+  // for the deep dive. Skip the very first load so the tag only fires on live arrivals.
+  const prevLatest = latestSnapshot(diagState.history);
+  const newLatest = valid.length ? valid[valid.length - 1] : null;
+  if (newLatest && prevLatest && newLatest.step > prevLatest.step) {
+    diagState.lastUpdateStep = newLatest.step;
+    diagState.lastUpdateTs = Date.now();
+  }
   diagState.activeRunId = runId;
   diagState.history = valid;
 
@@ -106,7 +125,8 @@ export function renderHealthTab() {
   if (!root) return;
   root.innerHTML = '';
   if (!diagState.activeRunId) {
-    root.appendChild(emptyState('No run selected', 'Pick a run from the sidebar to see its model health.'));
+    root.appendChild(emptyState('No run selected',
+      'Pick an active or recent run from the sidebar to see its model health.'));
     return;
   }
   if (!diagState.history.length) {

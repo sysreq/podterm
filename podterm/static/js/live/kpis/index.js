@@ -48,8 +48,21 @@ export function updateKpis(podId) {
   const msSeries = state.metricHistory.map((x) => x.step_avg_ms).filter((v) => v != null);
   const ema50 = d.ema(msSeries, d.ETA_EMA_N);
   const ema100 = d.ema(msSeries, d.AVG_EMA_N);
-  const remaining = m.total_steps != null ? m.total_steps - m.step : null;
-  const eta = state.finished ? 0 : d.etaMs(remaining, ema50);
+  // The run stops on its wall-clock time budget, not on total_steps: the gpt-golf
+  // loop is `while True` and breaks only when elapsed ≥ max_seconds (config_json.time_budget).
+  // total_steps is a nominal denominator the loop never checks, so projecting steps×ms/step
+  // overshoots wildly. Project the finish from the budget; fall back to step pace only for
+  // pre-budget runs that carry no time_budget.
+  const budgetMs = d.configFinishBudgetMs(state.runRow);
+  let eta;
+  if (state.finished) {
+    eta = 0;
+  } else if (budgetMs != null && m.train_time_ms != null) {
+    eta = Math.max(0, budgetMs - m.train_time_ms);
+  } else {
+    const remaining = m.total_steps != null ? m.total_steps - m.step : null;
+    eta = d.etaMs(remaining, ema50);
+  }
 
   if (state.finished) {
     cards.projected.set({
@@ -65,7 +78,7 @@ export function updateKpis(podId) {
   if (cards.projected.spark) cards.projected.spark(msSeries);
 
   const batchTokens = state.info.batch_tokens ?? state.runRow?.batch_tokens ?? null;
-  const finishBudgetMs = d.configFinishBudgetMs(state.runRow) ?? (m.train_time_ms ?? null);
+  const finishBudgetMs = budgetMs ?? (m.train_time_ms ?? null);
   const race = d.finishRace({
     metric: m,
     history: state.metricHistory,

@@ -44,6 +44,13 @@ export const sevRank = (st) => (st === 'error' || st === 'bad' ? 2 : st === 'par
 
 export const VERDICT_LABEL = { ok: 'OK', warn: 'WARN', error: 'ERROR' };
 
+// Section *execution* status — whether the probe ran to completion, distinct from
+// the metric health verdict (good/warn/bad). Labelled "complete"/"partial" (not
+// "ok") so a green badge here can't be misread as "metrics healthy" when the
+// section actually carries warn-band metrics.
+export const SECTION_STATUS_LABEL = { ok: 'complete', partial: 'partial', error: 'error', skipped: 'skipped' };
+export const sectionStatusLabel = (st) => SECTION_STATUS_LABEL[st] || st || '';
+
 export function makeEl(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;

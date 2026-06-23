@@ -27,10 +27,20 @@
 .health-rail-item:hover { border-color: var(--border); background: var(--bg-panel); }
 .health-rail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
 .health-detail-main { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
-.health-section { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-sm);
-                  padding: var(--sp-2) var(--sp-3); }
+.health-section { position: relative; background: var(--bg-panel); border: 1px solid var(--border);
+                  border-radius: var(--r-sm); padding: var(--sp-2) var(--sp-3); }
 .health-section > summary { cursor: pointer; display: flex; gap: var(--sp-2); align-items: baseline;
                            justify-content: space-between; }
+/* Transient "updated" tag, lower-right of an expanded section after a fresh
+   snapshot lands. Fades out over 10s (matches UPDATED_TAG_MS in deep.js). */
+.diag-sec-updated { position: absolute; right: var(--sp-3); bottom: var(--sp-2);
+                    font-size: var(--fs-xs); color: var(--accent); pointer-events: none;
+                    animation: diag-updated-fade 10s ease-out forwards; }
+@keyframes diag-updated-fade {
+  0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; }
+}
+.health-section-empty { margin-top: var(--sp-2); padding: var(--sp-2) 0; font-size: var(--fs-sm);
+                        color: var(--text-muted); font-style: italic; }
 .health-metric-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); margin-top: var(--sp-2); }
 .health-metric-table td { padding: 3px var(--sp-3); border-top: 1px solid var(--border); vertical-align: top; }
 

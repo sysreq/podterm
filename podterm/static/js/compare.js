@@ -30,7 +30,7 @@ function removeFromComparison(runId) {
   document.getElementById('selection-count').textContent = `${app.selectedRuns.size} selected`;
   if (app.selectedRuns.size < 2) {
     document.getElementById('compare-selection').style.display = 'none';
-    for (const id of ['compare-regression', 'compare-controls', 'compare-charts', 'compare-health', 'compare-summary']) {
+    for (const id of ['compare-regression', 'compare-controls', 'compare-charts', 'compare-config', 'compare-health', 'compare-summary']) {
       document.getElementById(id).innerHTML = '';
     }
     document.getElementById('compare-placeholder').style.display = '';
@@ -71,6 +71,7 @@ function renderComparison() {
   renderRegression(data);
   renderControls();
   renderCharts(data);
+  renderConfigRepro(data);
   renderHealthDiff(data);
   renderSummary(data);
 }
@@ -122,33 +123,81 @@ function renderRegression(data) {
 }
 
 function renderCharts(data) {
+  // Only the training-loss curve earns a full chart — it's a dense series. Validation
+  // BPB is one (or a few) end-of-run points, so it's a compact readout in the
+  // Config / Repro panel below, not a near-empty 300px plot.
   const lossTraces = [];
-  const bpbTraces = [];
   let i = 0;
   for (const [rid, metrics] of Object.entries(data.metrics)) {
     const label = runLabel(data.runs[rid] || {});
     const color = COLORS[i % COLORS.length];
-
     const cmpMetrics = metrics.filter((m) => m.train_loss);
     const trainSteps = cmpMetrics.map((m) => m.step);
     if (trainSteps.length) {
       lossTraces.push({ x: alignX(trainSteps), y: cmpMetrics.map((m) => scaleY(m.train_loss)),
         customdata: cmpMetrics.map((m) => m.train_loss), name: label, type: 'scatter', line: { color }, hovertemplate: lossHover });
     }
-    const valMetrics = metrics.filter((m) => m.val_bpb != null);
-    if (valMetrics.length) {
-      bpbTraces.push({ x: alignX(valMetrics.map((m) => m.step)), y: valMetrics.map((m) => m.val_bpb),
-        name: label, mode: 'markers+lines', marker: { color, size: 8 }, line: { color } });
-    }
     i++;
   }
   const xTitle = alignMode === 'progress' ? 'Progress (fraction of run)' : 'Step';
   const chartsEl = document.getElementById('compare-charts');
-  chartsEl.innerHTML = '<div class="chart-box" id="cmp-loss"></div><div class="chart-box" id="cmp-bpb"></div>';
+  chartsEl.innerHTML = '<div class="chart-box" id="cmp-loss"></div>';
   Plotly.newPlot('cmp-loss', lossTraces, { ...plotLayout, yaxis: lossYAxis, xaxis: { title: xTitle }, title: 'Training Loss Comparison', height: 300 }, plotConfig);
-  Plotly.newPlot('cmp-bpb', bpbTraces, { ...plotLayout, xaxis: { title: xTitle }, title: 'Validation BPB Comparison', height: 300 }, plotConfig);
   observePlotlyResize(document.getElementById('cmp-loss'));
-  observePlotlyResize(document.getElementById('cmp-bpb'));
+}
+
+// ── Validation BPB readout + Config / Repro side-by-side ──
+// Repro-relevant fields pulled from the run row (r) and its parsed launch config (c).
+const REPRO_FIELDS = [
+  ['Commit', (r) => r.commit_hash || '—'],
+  ['Branch', (r) => r.branch || '—'],
+  ['Seed', (r) => (r.seed != null ? String(r.seed) : '—')],
+  ['Data variant', (r, c) => r.data_variant || c.data_variant || '—'],
+  ['Vocab size', (r, c) => (r.vocab_size ?? c.vocab_size ?? '—').toString()],
+  ['Seq len', (r) => (r.seq_len != null ? String(r.seq_len) : '—')],
+  ['Batch tokens', (r) => (r.batch_tokens != null ? r.batch_tokens.toLocaleString() : '—')],
+  ['Time budget', (r, c) => (c.time_budget != null ? `${c.time_budget}s` : '—')],
+  ['Steps', (r) => (r.total_steps != null ? r.total_steps.toLocaleString() : '—')],
+  ['Model params', (r) => (r.model_params != null ? `${(r.model_params / 1e6).toFixed(2)}M` : '—')],
+  ['GPU', (r) => (r.gpu_type ? `${r.gpu_count ? r.gpu_count + '× ' : ''}${r.gpu_type}` : '—')],
+  ['Train script', (r, c) => c.train_script || '—'],
+];
+
+function renderConfigRepro(data) {
+  const el = document.getElementById('compare-config');
+  const ids = Object.keys(data.runs);
+  const baseId = data.diagnostics?.base || ids[0];
+  const cfg = {};
+  for (const rid of ids) {
+    try { cfg[rid] = JSON.parse(data.runs[rid]?.config_json || '{}') || {}; } catch { cfg[rid] = {}; }
+  }
+
+  // Compact Validation BPB: best (lowest) per run, winner highlighted.
+  const bpb = (rid) => data.runs[rid]?.best_val_bpb;
+  const present = ids.map(bpb).filter((v) => v != null);
+  const best = present.length ? Math.min(...present) : null;
+  let html = '<div class="cmp-section-title">Validation BPB (best)</div><div class="cmp-bpb-strip">';
+  for (const rid of ids) {
+    const v = bpb(rid);
+    const isBest = v != null && best != null && Math.abs(v - best) < 1e-9 && ids.length > 1;
+    html += `<div class="cmp-bpb-stat${isBest ? ' best' : ''}"><span class="cmp-bpb-run">${escapeHtml(runLabel(data.runs[rid] || {}))}</span>`
+      + `<span class="cmp-bpb-val">${v != null ? v.toFixed(4) : '—'}</span></div>`;
+  }
+  html += '</div>';
+
+  // Config / Repro matrix: field (rows) × run (cols); rows that differ are flagged.
+  html += '<div class="cmp-section-title">Config / Repro</div><table class="cmp-config"><thead><tr><th>Field</th>';
+  for (const rid of ids) html += `<th>${escapeHtml(runLabel(data.runs[rid] || {}))}${rid === baseId ? ' <span class="cmp-base">base</span>' : ''}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const [label, get] of REPRO_FIELDS) {
+    const vals = ids.map((rid) => String(get(data.runs[rid] || {}, cfg[rid] || {})));
+    const differ = vals.some((v) => v !== vals[0]);
+    html += `<tr${differ ? ' class="cmp-diff"' : ''}><td>${escapeHtml(label)}</td>`;
+    for (const v of vals) html += `<td>${escapeHtml(v)}</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
 
 // ── Model Health diff: verdict + headline side-by-side, plus per-run movers vs base ──

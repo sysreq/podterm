@@ -17,6 +17,24 @@
 .cmp-health thead th { color: var(--text-muted); font-weight: 600; border-top: none; }
 .cmp-verdict-row td { font-weight: 600; }
 .cmp-base { font-size: 9px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+/* Validation BPB compact strip (replaces the near-empty BPB chart) */
+.cmp-bpb-strip { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.cmp-bpb-stat { display: flex; align-items: baseline; gap: var(--sp-2); padding: 6px var(--sp-3);
+                border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-panel); }
+.cmp-bpb-stat.best { border-color: var(--success); background: var(--success-dim); }
+.cmp-bpb-run { font-size: var(--fs-sm); color: var(--text-secondary); }
+.cmp-bpb-val { font-size: var(--fs-lg); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.cmp-bpb-stat.best .cmp-bpb-val { color: var(--success); }
+
+/* Config / Repro side-by-side table; rows that differ across runs are flagged */
+.cmp-config { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); margin-bottom: var(--sp-2); }
+.cmp-config th, .cmp-config td { padding: 4px var(--sp-3); text-align: left; border-top: 1px solid var(--border);
+                                 font-variant-numeric: tabular-nums; }
+.cmp-config thead th { color: var(--text-muted); font-weight: 600; border-top: none; }
+.cmp-config td:first-child { color: var(--text-muted); }
+.cmp-config tr.cmp-diff td { background: var(--warn-dim); }
+.cmp-config tr.cmp-diff td:first-child { color: var(--warn); }
+
 .cmp-movers { margin: var(--sp-2) 0; }
 .cmp-movers > summary { font-size: var(--fs-sm); color: var(--text-secondary); cursor: pointer; margin-bottom: var(--sp-2); }
 #log-tabs { display: flex; gap: 2px; }

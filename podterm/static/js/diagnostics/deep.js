@@ -1,7 +1,11 @@
 import { getPodState } from '../state.js';
 import { escapeHtml } from '../dom.js';
 import { latestSnapshot, referenceDoc } from './selectors.js';
-import { bandClass, fmtRowMetrics, makeEl, sevRank } from './format.js';
+import { bandClass, fmtRowMetrics, makeEl, sectionStatusLabel, sevRank } from './format.js';
+
+// How long the "updated" tag lingers on an expanded section after a new snapshot
+// lands (matched by the CSS fade-out animation duration).
+const UPDATED_TAG_MS = 10_000;
 
 const el = (id) => document.getElementById(id);
 
@@ -93,7 +97,7 @@ function renderSectionRail(sections) {
   sections.forEach((s, i) => {
     const item = makeEl('button', 'health-rail-item');
     item.append(makeEl('span', 'health-rail-name', s.name),
-      makeEl('span', `health-badge ${bandClass(s.status === 'ok' ? 'good' : s.status)}`, s.status));
+      makeEl('span', `health-badge ${bandClass(s.status === 'ok' ? 'good' : s.status)}`, sectionStatusLabel(s.status)));
     item.addEventListener('click', () => {
       const target = el(`health-sec-${i}`);
       if (target) { target.open = true; target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -111,15 +115,28 @@ function renderDetailMain(ctx, sections, refDoc) {
         : 'No previous snapshot to compare against.'));
   }
   const refSection = (name) => (refDoc?.sections || []).find((s) => s.name === name);
+  // Open-state is keyed by section name and persisted in view.openSections so it
+  // survives re-renders (diff-mode switch, new snapshot, snapshot selection). On
+  // first render it's seeded from the severity default (problem sections expanded).
+  if (ctx.state.view.openSections == null) {
+    ctx.state.view.openSections = new Set(
+      sections.filter((s) => ['error', 'partial', 'warn'].includes(s.status)).map((s) => s.name));
+  }
+  const openSet = ctx.state.view.openSections;
+  // A fresh snapshot that changed the live view flags expanded sections as updated.
+  const viewingLatest = ctx.state.view.selectedStep == null;
+  const updatedFresh = ctx.state.lastUpdateTs > 0 && (Date.now() - ctx.state.lastUpdateTs) < UPDATED_TAG_MS;
   sections.forEach((s, i) => {
     const sec = makeEl('details', 'health-section');
     sec.id = `health-sec-${i}`;
-    sec.open = ['error', 'partial', 'warn'].includes(s.status);
+    sec.open = openSet.has(s.name);
+    sec.addEventListener('toggle', () => { if (sec.open) openSet.add(s.name); else openSet.delete(s.name); });
     const summary = document.createElement('summary');
     summary.innerHTML = `<span class="diag-sec-name">${escapeHtml(s.name)}</span>`
-      + `<span class="diag-sec-status diag-${escapeHtml(s.status)}">${escapeHtml(s.status)}`
+      + `<span class="diag-sec-status diag-${escapeHtml(s.status)}">${escapeHtml(sectionStatusLabel(s.status))}`
       + `${s.reason ? ': ' + escapeHtml(s.reason) : ''}</span>`;
     sec.appendChild(summary);
+    if (sec.open && updatedFresh && viewingLatest) sec.appendChild(makeEl('div', 'diag-sec-updated', 'updated'));
 
     const rows = s.rows || {};
     const refRows = refSection(s.name)?.rows || {};
@@ -134,6 +151,12 @@ function renderDetailMain(ctx, sections, refDoc) {
         table.appendChild(tr);
       }
       sec.appendChild(table);
+    } else {
+      // The probe ran ('complete') but emitted no metric rows — e.g. this model has
+      // no learnable params for the check. Say so instead of expanding to a blank.
+      const notes = Array.isArray(s.notes) ? s.notes.filter(Boolean) : [];
+      sec.appendChild(makeEl('div', 'health-section-empty',
+        notes.length ? notes.join(' ') : 'No metrics for this section on this model.'));
     }
     main.appendChild(sec);
   });
