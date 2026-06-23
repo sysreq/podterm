@@ -1,0 +1,15 @@
+FROM ghcr.io/sysreq/gpt-caddy-base:latest
+
+# Built and pushed as ghcr.io/sysreq/gpt-caddy-cache-server (see build.sh). PodTerm's
+# detect_redis_server() finds the running pod by "cache-server" in its image name.
+# The base already provides Ubuntu 26.04, openssh-server, curl, ca-certificates.
+# A lightweight in-memory cache only needs redis itself on top.
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends redis-server && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/*
+
+COPY scripts/redis_bootstrap.sh /usr/local/bin/redis_bootstrap.sh
+RUN chmod +x /usr/local/bin/redis_bootstrap.sh
+
+EXPOSE 6379 22
+CMD ["/usr/local/bin/redis_bootstrap.sh"]

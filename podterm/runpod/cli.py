@@ -248,11 +248,16 @@ def api_get_pod(pod_id: str, include_machine: bool = False) -> dict | None:
 
 
 def detect_redis_server() -> str | None:
-    """Find a running pod with 'redis' in the image and return ip:port."""
+    """Find the running compile-cache pod and return ip:port.
+
+    Identified by image name: the cache image is ghcr.io/sysreq/gpt-caddy-cache-server
+    (it runs redis-server inside). "redis" kept as a fallback for legacy/stock images.
+    """
     for pod in api_list_pods():
         if pod.get("desiredStatus") != "RUNNING":
             continue
-        if "redis" not in (pod.get("imageName") or "").lower():
+        img = (pod.get("imageName") or "").lower()
+        if "cache-server" not in img and "redis" not in img:
             continue
         details = api_get_pod(pod["id"])
         if not details:

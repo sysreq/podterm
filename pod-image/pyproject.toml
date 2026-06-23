@@ -1,0 +1,67 @@
+[project]
+name = "gpt-golf"
+version = "0.0.2"
+description = "Minimal GPT-style transformer for pretraining research"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.12.1",
+    "tokenizers>=0.22.2",
+    "numpy>=2.4.6",
+    "sentencepiece",
+    "pydot",
+    "flash-attn-4[cu13]>=4.0.0b18",
+    "redis",
+]
+
+[dependency-groups]
+dev = [
+    "matplotlib>=3.8",
+    "pytest>=8",
+    "textual>=8.2.1",
+]
+
+[tool.uv]
+# torch pins these transitive CUDA deps with version ranges, so they otherwise
+# resolve to newer PyPI builds than the cu132 index (and the base image) ship.
+# Hold them at the cu132-tested versions so the baked venv matches the lock.
+constraint-dependencies = [
+    "nvidia-nvjitlink==13.2.78",
+    "cuda-bindings==13.0.3",
+]
+
+# Drop torch's `cusolver` extra. nvidia-cusolver (~263 MB) is reachable only through
+# cuda-toolkit[cusolver], and its sole consumer -- a post-training diagnostics SVD -- now
+# runs on CPU. This is torch's own Requires-Dist verbatim with `cusolver` removed from the
+# cuda-toolkit extras; every other CUDA pin is identical, so the cu132 set is unchanged.
+[[tool.uv.dependency-metadata]]
+name = "torch"
+version = "2.12.1+cu132"
+requires-dist = [
+    "filelock",
+    "typing-extensions>=4.10.0",
+    "setuptools<82",
+    "sympy>=1.13.3",
+    "networkx>=2.5.1",
+    "jinja2",
+    "fsspec>=0.8.5",
+    "cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusparse,nvjitlink,nvrtc,nvtx]==13.2.1; platform_system == 'Linux'",
+    "cuda-bindings<14,>=13.0.3; platform_system == 'Linux'",
+    "nvidia-cudnn-cu13==9.20.0.48; platform_system == 'Linux'",
+    "nvidia-cusparselt-cu13==0.8.1; platform_system == 'Linux'",
+    "nvidia-nccl-cu13==2.29.7; platform_system == 'Linux'",
+    "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux'",
+    "triton==3.7.1; platform_system == 'Linux'",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu132" },
+]
+# b18 is published only as a GitHub release asset, not on PyPI.
+flash-attn-4 = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/fa4-v4.0.0.beta18/flash_attn_4-4.0.0b18-py3-none-any.whl" }
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true

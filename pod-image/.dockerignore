@@ -1,0 +1,7 @@
+# This dir IS the build context. Only the Dockerfiles' COPY targets need to ship;
+# keep the rest out of the daemon context (they never land in an image anyway).
+README.md
+build.sh
+.dockerignore
+**/__pycache__/
+**/*.pyc

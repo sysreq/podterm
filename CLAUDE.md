@@ -1,6 +1,15 @@
 # PodTerm
 
-Local FastAPI app for launching and monitoring micro-GPT training runs on RunPod GPU pods (images built from the sibling `gpt-golf` repo).
+Local FastAPI app for launching and monitoring micro-GPT training runs on RunPod GPU pods (container images built from `pod-image/`).
+
+## Pod image build
+
+The RunPod container images live in `pod-image/` (a self-contained Docker build context; build via `pod-image/build.sh`). Three layered images, all `ghcr.io/sysreq/`:
+- `gpt-caddy-base` (`Dockerfile.base`) — Ubuntu 26.04 + baked torch/CUDA venv, split across layers for parallel cold-pull. Rebuilt rarely.
+- `gpt-caddy-single-train` (`Dockerfile`) — `FROM` base; PodTerm's default launch image (`config.DEFAULT_IMAGE` / `TEMPLATE_NAME`). Its entrypoint `scripts/bootstrap.sh` git-clones gpt-golf at boot and runs `train_gpt.py` — the training code is **not** baked in.
+- `gpt-caddy-cache-server` (`Dockerfile.redis`) — `FROM` base + `redis-server`; the shared torch.compile (Inductor) cache. PodTerm finds it via `runpod/cli.detect_redis_server` (matches `cache-server` in the image name).
+
+The train image bakes only gpt-golf's **dependency closure** so the pod's runtime `uv sync` is a no-op. That closure is gpt-golf's `pyproject.toml` + `uv.lock` (torch/flash-attn/CUDA), **not** PodTerm's own root manifest — so `pod-image/` keeps a **vendored copy** of gpt-golf's manifest that `build.sh` refreshes from the gpt-golf checkout before building (override location with `GPT_GOLF_DIR`). `scripts/discover_cache.sh` is not baked — it runs on the pod from the cloned gpt-golf repo. Renaming any image means updating both `build.sh` and the three `config.py`/`cli.py` references above. See `pod-image/README.md`.
 
 ## Event pipeline
 

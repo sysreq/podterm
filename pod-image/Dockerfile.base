@@ -1,0 +1,126 @@
+FROM ubuntu:26.04 AS base
+
+# Layer 1: System essentials + Python 3.14 (26.04 default)
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl git git-lfs openssh-server \
+        python3.14 python3.14-dev python3.14-venv \
+        gcc libtcmalloc-minimal4 zstd unzip graphviz && \
+    git lfs install && \
+    ln -sf /usr/bin/python3.14 /usr/local/bin/python3 && \
+    ln -sf /usr/bin/python3.14 /usr/local/bin/python && \
+    apt-get autoclean && apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Layer 2: uv + HuggingFace tooling (CLI + xet transfer extension)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+RUN curl -LsSf https://hf.co/cli/install.sh | bash && \
+    curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/huggingface/xet-core/refs/heads/main/git_xet/install.sh | bash
+
+# Layer 3: CUDA forward-compat libs (newer CUDA on older host drivers)
+RUN curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb \
+        -o /tmp/cuda-keyring.deb && \
+    dpkg -i /tmp/cuda-keyring.deb && rm /tmp/cuda-keyring.deb && \
+    apt-get update -qq && \
+    apt-get install -y --no-install-recommends cuda-compat-13-2 && \
+    apt-get autoclean && apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    SHELL=/bin/bash \
+    PYTHONUNBUFFERED=True \
+    LD_LIBRARY_PATH=/usr/local/cuda-13.2/compat \
+    LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 \
+    UV_LINK_MODE=symlink \
+    UV_CACHE_DIR=/opt/uv-cache \
+    HF_HOME=/workspace/.cache/huggingface/ \
+    HF_HUB_ENABLE_HF_TRANSFER=1 \
+    HF_XET_HIGH_PERFORMANCE=1 \
+    TZ=Etc/UTC
+
+# Layer 4: baked venv + torch 2.12 (cu132) + CUDA libraries. Versions match
+# torch 2.12.1+cu132's cuda-toolkit==13.2.1 dependency set and uv.lock exactly,
+# so the training image's `uv sync` treats them as satisfied (no reinstall).
+# Each lib is its own slice/layer so they pull in parallel on a cold pod. All
+# --no-deps: the CUDA libs below ARE torch's deps, installed explicitly.
+ENV TORCH_INDEX=https://download.pytorch.org/whl/cu132
+RUN uv venv /opt/.venv --python /usr/local/bin/python3
+
+# Torch builder: install torch as REAL files (copy mode) and set the two giant .so aside, so
+# the final image can COPY each on its own layer. The torch wheel is ~480 MB compressed,
+# dominated by libtorch_cuda.so (~318) + libtorch_cpu.so (~132); as a single install that is
+# one serial blob on a cold pull. Split, the two giants download in parallel (and overlap the
+# CUDA slices). This stage is discarded -- only the COPYs below ship.
+FROM base AS torchbuild
+RUN uv pip install --no-deps --link-mode=copy --python /opt/.venv/bin/python --index-url $TORCH_INDEX torch==2.12.1 && \
+    mkdir -p /torchsplit && cd /opt/.venv/lib/python3.14/site-packages/torch/lib && \
+    mv libtorch_cuda.so libtorch_cpu.so /torchsplit/
+
+# cuBLAS builder: same split trick as torch. Install copy-mode (real files) and set both .so aside
+# so each ships on its own COPY layer below -- the 52 MB libcublas.so.13 then pulls in parallel
+# instead of riding serially behind the ~347 MB libcublasLt.so.13 giant. Discarded -- only the
+# COPYs ship; the final image's slice-1 install supplies the matching dist-info.
+FROM base AS cublasbuild
+RUN uv pip install --no-deps --link-mode=copy --python /opt/.venv/bin/python --index-url $TORCH_INDEX nvidia-cublas==13.4.0.1 && \
+    mkdir -p /cublassplit && cd /opt/.venv/lib/python3.14/site-packages/nvidia/cu13/lib && \
+    mv libcublas.so.13 libcublasLt.so.13 /cublassplit/
+
+# Final image: CUDA deps (each a parallel-pull slice), then torch (split), then the stub slice.
+FROM base
+# CUDA slice 1/7: cublas metadata. libcublasLt.so.13 (~347 MB gz) is the indivisible cold-pull
+# floor; install here only for the dist-info (keeps the training image's `uv sync` a no-op), then
+# drop both .so so they don't ship in this layer -- they arrive split (own layers) from cublasbuild
+# below, so the 52 MB libcublas.so.13 pulls in parallel instead of behind the giant.
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX nvidia-cublas==13.4.0.1 && \
+    cd /opt/.venv/lib/python3.14/site-packages/nvidia/cu13/lib && \
+    for so in libcublas.so.13 libcublasLt.so.13; do rm -f "$(readlink -f "$so")" "$so"; done
+# CUDA slice 2/7: cudnn -- keep the 129 KB API shim + graph/ops/cnn/adv backends, drop the
+# three execution-only sub-libs (precompiled + runtime-compiled engines, heuristics = 320 MB).
+# This model runs no cudnn op (cudnn-SDP disabled, no convs/RNN/batchnorm), so the shim never
+# dlopens them and torch binds zero symbols from them. Deleted in the install RUN (rm-ing the
+# symlink + its uv-cache target) so the bytes leave the layer.
+# Re-add the wheel untrimmed if you ever enable cudnn-SDP, set cudnn.benchmark, or add a
+# conv/RNN/batchnorm layer -- those would dlopen a deleted backend and fail at runtime.
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX nvidia-cudnn-cu13==9.20.0.48 && \
+    for f in engines_precompiled engines_runtime_compiled heuristic; do \
+        for p in /opt/.venv/lib/python*/site-packages/nvidia/cudnn/lib/libcudnn_$f.so.9; do \
+            rm -f "$(readlink -f "$p")" "$p"; \
+        done; \
+    done
+# CUDA slice 3/7: nccl (cusparselt moved to the stub slice below)
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX nvidia-nccl-cu13==2.29.7
+# CUDA slice 4/7: nvrtc + cusparse (cusolver dropped via pyproject dependency-metadata -- ~263 MB, only used by CPU-moved diagnostics SVD)
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX nvidia-cuda-nvrtc==13.2.78 nvidia-cusparse==12.7.10.1
+# CUDA slice 5/7: curand + cudart + cupti + nvtx + cufile (cufft moved to the stub slice below)
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX \
+    nvidia-curand==10.4.2.55 nvidia-cuda-runtime==13.2.75 \
+    nvidia-cuda-cupti==13.2.75 nvidia-nvtx==13.2.75 nvidia-cufile==1.17.1.22
+# CUDA slice 6/7: nvjitlink + nvshmem + cuda-bindings
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX nvidia-nvjitlink==13.2.78 nvidia-nvshmem-cu13==3.4.5 cuda-bindings==13.0.3
+# CUDA slice 7/7: triton
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX triton==3.7.1
+
+# Torch core, split for parallel pull: the package (minus the two giants) + functorch/torchgen/
+# dist-info, then each giant on its own layer. Real files COPY'd from the builder; dist-info
+# stays intact so the training image's `uv sync` is a no-op. SP must match the builder's path.
+COPY --from=torchbuild /opt/.venv/lib/python3.14/site-packages/torch /opt/.venv/lib/python3.14/site-packages/torch
+COPY --from=torchbuild /opt/.venv/lib/python3.14/site-packages/functorch /opt/.venv/lib/python3.14/site-packages/functorch
+COPY --from=torchbuild /opt/.venv/lib/python3.14/site-packages/torchgen /opt/.venv/lib/python3.14/site-packages/torchgen
+COPY --from=torchbuild /opt/.venv/lib/python3.14/site-packages/torch-2.12.1+cu132.dist-info /opt/.venv/lib/python3.14/site-packages/torch-2.12.1+cu132.dist-info
+COPY --from=torchbuild /opt/.venv/bin/torchrun /opt/.venv/bin/torchfrtrace /opt/.venv/bin/
+COPY --from=torchbuild /torchsplit/libtorch_cpu.so  /opt/.venv/lib/python3.14/site-packages/torch/lib/libtorch_cpu.so
+COPY --from=torchbuild /torchsplit/libtorch_cuda.so /opt/.venv/lib/python3.14/site-packages/torch/lib/libtorch_cuda.so
+# cuBLAS giants, split for parallel pull (see cublasbuild); slice 1/7 left the matching dist-info.
+COPY --from=cublasbuild /cublassplit/libcublas.so.13   /opt/.venv/lib/python3.14/site-packages/nvidia/cu13/lib/libcublas.so.13
+COPY --from=cublasbuild /cublassplit/libcublasLt.so.13 /opt/.venv/lib/python3.14/site-packages/nvidia/cu13/lib/libcublasLt.so.13
+
+# Stub slice: install cufft + cusparseLt, then swap their .so for 16 KB no-op stubs in the
+# SAME layer so ~500 MB of never-called FFT / 2:4-structured-sparse kernels never persist.
+# Runs after torch so the generator reads the exact symbols torch binds; the wheels stay
+# "installed" (dist-info intact) so the training image's `uv sync` is still a no-op.
+COPY scripts/stub_unused_cuda_libs.sh /usr/local/bin/stub_unused_cuda_libs.sh
+RUN uv pip install --no-deps --python /opt/.venv/bin/python --index-url $TORCH_INDEX \
+        nvidia-cufft==12.2.0.46 nvidia-cusparselt-cu13==0.8.1 && \
+    bash /usr/local/bin/stub_unused_cuda_libs.sh /opt/.venv/lib/python*/site-packages
+
+WORKDIR /workspace

@@ -1,7 +1,7 @@
 """Boot progress — parses RunPod machine logs into image-pull layer states.
 
 Machine log lines (from api_get_machine_logs) look like:
-    2026-06-13T00:26:51Z create container ghcr.io/sysreq/gpt-golf-train:latest
+    2026-06-13T00:26:51Z create container ghcr.io/sysreq/gpt-caddy-single-train:latest
     2026-06-13T00:26:52Z b257450ba61a Pulling fs layer
     2026-06-13T00:26:53Z b257450ba61a Downloading
     2026-06-13T00:26:56Z b257450ba61a Pull complete

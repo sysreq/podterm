@@ -111,7 +111,7 @@ def load_dotenv(path: str | os.PathLike | None = None) -> None:
 
 POD_PREFIX = "gg"
 DEFAULT_GPU = "RTX 6000 Ada"
-DEFAULT_IMAGE = "ghcr.io/sysreq/gpt-golf-train:latest"
+DEFAULT_IMAGE = "ghcr.io/sysreq/gpt-caddy-single-train:latest"
 DEFAULT_CONTAINER_DISK_GB = 50
 DEFAULT_VOLUME_DISK_GB = 50
 DEFAULT_CLOUD_TYPE = "SECURE"
@@ -129,7 +129,7 @@ DEFAULT_TORCH_LOGS = "graph_breaks,graph_code"
 BASELINE_GPU = "NVIDIA H100 80GB HBM3"
 BASELINE_GPU_COUNT = 8
 
-TEMPLATE_NAME = "gpt-golf-train"
+TEMPLATE_NAME = "gpt-caddy-single-train"
 
 # Port the on-pod event daemon (gpt-golf scripts/pod_eventd.py) listens on,
 # exposed as /http in the template → https://{pod_id}-{port}.proxy.runpod.net
