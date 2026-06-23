@@ -52,7 +52,7 @@ def get_git_branches(repo_dir: Path | None = None) -> list[str]:
     """List branches of the repo whose code actually gets trained.
 
     The launched images train the sibling gpt-golf checkout (CLAUDE.md), so branches
-    come from ``gpt_golf_dir()`` — not PodTerm's CWD. A non-zero git exit (no repo,
+    come from ``gpt_golf_dir()`` — not GPT Caddy's CWD. A non-zero git exit (no repo,
     git missing, etc.) falls back to ``[DEFAULT_BRANCH]`` rather than treating empty
     stdout as a valid empty branch list. ``repo_dir`` is overridable for tests.
     """

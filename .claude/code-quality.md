@@ -1,8 +1,8 @@
-# PodTerm — Pre-Demo Code-Quality Backlog
+# GPT Caddy — Pre-Demo Code-Quality Backlog
 
 ## Context
 
-We want to put PodTerm's best foot forward for a code-review demo where reviewers may
+We want to put GPT Caddy's best foot forward for a code-review demo where reviewers may
 "look under the hood." The codebase is small and generally well-structured (good module
 separation, thoughtful docstrings, a documented architecture in CLAUDE.md), so the goal is
 not a rewrite — it's removing the rough edges a senior/staff reviewer would flag: scattered
@@ -34,7 +34,7 @@ Scope reviewed: all of `podterm/` (backend + `runpod/` + `diagnostics/`), `stati
 - **A2 — No CI. [RESOLVED]** `.github/workflows/ci.yml` runs on push + PR: `uv run ruff check .`,
   `uv run pytest -q`, and `node --test` for both frontend test files. (No `ruff format --check`
   — see A1.)
-- **A3 — No human-facing README. [RESOLVED]** A root `README.md` now covers what PodTerm is,
+- **A3 — No human-facing README. [RESOLVED]** A root `README.md` now covers what GPT Caddy is,
   an architecture overview (pointing to `CLAUDE.md` for depth), setup/run, test commands, the
   security model, and limitations.
 - **A4 — Orphaned JS test. [RESOLVED]** Both `podterm/static/js/derive.test.mjs` and

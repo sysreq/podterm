@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pod event daemon — serves structured JSONL events + the raw teed log over HTTP.
 
-Stdlib only: starts before `uv sync` (system python3). PodTerm pulls via the RunPod
+Stdlib only: starts before `uv sync` (system python3). GPT Caddy pulls via the RunPod
 HTTP proxy. Env: EVENTS_FILE, LOG_FILE, EVENTD_TOKEN, EVENTD_PORT (default 8765).
 """
 
@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(data)
 
     def _snapshot(self, q):
-        """Stream a model snapshot for PodTerm to run diagnostics off-pod."""
+        """Stream a model snapshot for GPT Caddy to run diagnostics off-pod."""
         try: step = int(q.get("step", [""])[0])
         except (ValueError, IndexError): return self._json(400, {"error": "bad step"})
         path = os.path.join(SNAPSHOT_DIR, f"step{step}.pt")  # filename built from an int — no path traversal
@@ -116,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
             for chunk in iter(lambda: f.read(262144), b""): self.wfile.write(chunk)
 
     def _snapshot_ack(self, q):
-        """PodTerm acks the final snapshot download → release bootstrap.sh's teardown wait."""
+        """GPT Caddy acks the final snapshot download → release bootstrap.sh's teardown wait."""
         try:
             with open(ACK_FILE, "w") as f: f.write(q.get("step", [""])[0])
         except OSError: pass

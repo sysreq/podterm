@@ -1,6 +1,6 @@
-# PodTerm — Live Demo Run-of-Show
+# GPT Caddy — Live Demo Run-of-Show
 
-**One-liner:** *PodTerm is a thin local control plane for renting GPUs by the minute,
+**One-liner:** *GPT Caddy is a thin local control plane for renting GPUs by the minute,
 running micro-GPT training on them, watching it live in the browser, and grading the
 model's health off the training GPU — all from a single-user app on your laptop.*
 
@@ -43,8 +43,8 @@ model's health off the training GPU — all from a single-user app on your lapto
 
 ## 2. What just happened: the ecosystem (2:00–7:00)
 
-This is the **infrastructure** section. Frame: *"PodTerm is small on purpose — the heavy
-lifting lives in a sibling repo, `gpt-golf`, which is what actually runs on the pod. PodTerm
+This is the **infrastructure** section. Frame: *"GPT Caddy is small on purpose — the heavy
+lifting lives in a sibling repo, `gpt-golf`, which is what actually runs on the pod. GPT Caddy
 is the remote control."* Keep it about plumbing, not the model.
 
 ### 2a. Ephemeral GPUs as cattle (1 min)
@@ -78,7 +78,7 @@ changed) → download data → probe the compile cache → launch training → t
   together — no mismatched-tokenizer footguns.
 - **Two-phase download:** grab a few shards + the tokenizer/val split *blocking* so training
   can start fast, then **stream the rest in the background** while training consumes it.
-- Nice reuse: PodTerm runs **this same downloader locally** to fetch the val shard + tokenizer
+- Nice reuse: GPT Caddy runs **this same downloader locally** to fetch the val shard + tokenizer
   it needs for off-pod diagnostics. One data path, two environments.
 
 ### 2e. The redis compile cache (0.5 min)
@@ -98,7 +98,7 @@ should show real image-pull progress.**
 
 ### 3a. The boot panel (on screen, ~0:45)
 - Point at it: *"This is the pod pulling its Docker image, layer by layer, right now."*
-- How it works (one breath): before the pod's own daemon is reachable, PodTerm **polls
+- How it works (one breath): before the pod's own daemon is reachable, GPT Caddy **polls
   RunPod's host machine logs and parses them into per-layer pull progress** — that's the
   panel. (Behind the scenes this needs a short-lived console token, not the API key — a fun
   aside if the audience is into auth.)
@@ -106,7 +106,7 @@ should show real image-pull progress.**
 ### 3b. The event pipeline (1.5 min, diagram on a slide)
 The end-to-end path, said plainly:
 ```
-gpt-golf pod                      PodTerm (laptop)                    browser
+gpt-golf pod                      GPT Caddy (laptop)                    browser
 pod_eventd.py  ──JSONL events──►  PodPoller ──► EventPipeline ──► SSEHub ──► Live UI
 (stdlib HTTP    over RunPod's      (long-poll)   .drain_loop          │
  daemon :8765)  HTTPS proxy,                          │               └► (live charts/cards)
@@ -116,7 +116,7 @@ pod_eventd.py  ──JSONL events──►  PodPoller ──► EventPipeline �
 - **`pod_eventd.py`** is a **stdlib-only HTTP daemon** (no deps, so it starts before anything
   is installed). It serves: structured **JSONL events**, the **raw log**, and **model
   snapshots** — plus a tiny **`/snapshot/ack`** handshake (more in §5).
-- PodTerm reaches it over **RunPod's HTTPS proxy** (`{pod_id}-8765.proxy.runpod.net`),
+- GPT Caddy reaches it over **RunPod's HTTPS proxy** (`{pod_id}-8765.proxy.runpod.net`),
   authenticated by a **per-run bearer token** minted at launch.
 - The **event schema is a contract**: line-delimited JSON, `{t, ts, ...}`, with types like
   `phase`, `metric`, `gpu`, `snapshot`, `summary`. Two phase strings are **load-bearing** —
@@ -169,11 +169,11 @@ The second flagship. Frame the **why** first, then show it.
 
 ### 5a. Why off-pod (~0:45)
 - Training should spend every GPU-second training. So instead of grading the model on the
-  pod, **PodTerm downloads each snapshot and runs the diagnostics suite locally** — as a
+  pod, **GPT Caddy downloads each snapshot and runs the diagnostics suite locally** — as a
   subprocess under gpt-golf's torch env (the model architecture changes constantly, so it's
   single-sourced there). The pod stays focused on training.
 - The **snapshot handshake**: the pod saves a checkpoint and emits a `snapshot` event;
-  PodTerm pulls it, runs diagnostics, and on the *final* one calls **`/snapshot/ack`** so the
+  GPT Caddy pulls it, runs diagnostics, and on the *final* one calls **`/snapshot/ack`** so the
   pod knows it's safe to shut down (bootstrap waits ~120 s for this).
 
 ### 5b. The Model Health tab (on screen, ~1.5 min)

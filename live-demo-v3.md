@@ -1,4 +1,4 @@
-# PodTerm — Interview Demo Run-of-Show v3 (Stellar Science)
+# GPT Caddy — Interview Demo Run-of-Show v3 (Stellar Science)
 
 > The build-ready script. Merges the detailed feature material from `live-demo.md` (v1)
 > with the strategic re-aim in `live-demo-v2.md`: this is a **hiring-panel demo**, not a
@@ -66,7 +66,7 @@ the payoff of that story**, not just a cool feature.
 - `[SAY]` (near-verbatim opener):
   > "Most of training a small GPT is guess and check. You tweak something, wait, stare at a
   > loss curve, and still can't answer the one question that matters: *why* is it doing what
-  > it's doing. So I built the instrument I wanted. PodTerm rents a GPU by the minute, runs the
+  > it's doing. So I built the instrument I wanted. GPT Caddy rents a GPU by the minute, runs the
   > training, gives me live X-ray vision into the run, and grades the model's health *off* the
   > training GPU — so I can see *why* and decide what to change next in minutes, not hours."
 - `[LIVE, off critical path]` Quietly kick a **fresh launch** here as the "it's really
@@ -81,7 +81,7 @@ the payoff of that story**, not just a cool feature.
   right now we'll get to."
 
 ### Beat 3 — How it's built (3:00–7:00) · systems depth, bait the drill-downs
-Frame: `[SAY]` "PodTerm is deliberately small — a control plane on my laptop. The heavy lifting
+Frame: `[SAY]` "GPT Caddy is deliberately small — a control plane on my laptop. The heavy lifting
 runs on the pod, from a sibling repo, `gpt-golf`. Let me show you the parts I'm proud of."
 
 **3a · `[SLIDE]` Architecture — ephemeral pods, durable laptop**
@@ -121,7 +121,7 @@ runs on the pod, from a sibling repo, `gpt-golf`. Let me show you the parts I'm 
 
 **3c · `[SLIDE]` The wire — how the pod talks to the laptop**
 ```
-gpt-golf pod                      PodTerm (laptop)                    browser
+gpt-golf pod                      GPT Caddy (laptop)                    browser
 pod_eventd.py  ──JSONL events──►  PodPoller ──► EventPipeline ──► SSEHub ──► Live UI
 (stdlib HTTP    over RunPod's      (long-poll)   .drain_loop          │
  daemon :8765)  HTTPS proxy,                          │               └► (live charts/cards)
@@ -166,10 +166,10 @@ pod_eventd.py  ──JSONL events──►  PodPoller ──► EventPipeline �
 ### Beat 5 — Diagnose: the payoff of "see why" (12:00–16:00) · `[LIVE]` + `[SLIDE]`
 This is the resolution of the origin story. Frame the **why**, then show it, then the keystone.
 - **5a · Why off-pod.** `[SAY]` "Every GPU-second should train. So I don't grade the model on
-  the pod — PodTerm **downloads each snapshot and runs the diagnostics locally**, as a
+  the pod — GPT Caddy **downloads each snapshot and runs the diagnostics locally**, as a
   subprocess under gpt-golf's torch env (the architecture changes constantly, so it's
   single-sourced there)." The **snapshot handshake**: pod saves a checkpoint → emits a
-  `snapshot` event → PodTerm pulls it, runs diagnostics → on the final one calls
+  `snapshot` event → GPT Caddy pulls it, runs diagnostics → on the final one calls
   `/snapshot/ack` so the pod knows it's safe to stop (bootstrap waits ~120 s).
 - **5b · `[LIVE]` Model Health tab.** The **verdict card** (OK / WARN / ERROR) in plain
   language, top issues, and a **clickable snapshot timeline** (health at each checkpoint).

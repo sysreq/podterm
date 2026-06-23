@@ -1,4 +1,4 @@
-"""Full-page screenshot of the PodTerm UI for visual-diff checkpoints.
+"""Full-page screenshot of the GPT Caddy UI for visual-diff checkpoints.
 
 Usage: .venv/bin/python scripts/ui_shot.py OUT.png [--width 1456] [--height 1086] [--url URL]
 

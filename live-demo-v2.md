@@ -1,4 +1,4 @@
-# PodTerm Interview Demo — Run-of-Show v2 (Stellar Science)
+# GPT Caddy Interview Demo — Run-of-Show v2 (Stellar Science)
 
 > Companion to `live-demo.md`. This version re-aims the demo at a hiring panel
 > instead of a general meetup, and de-risks the live element for a Teams audience.
@@ -32,7 +32,7 @@ the origin story**, not just a feature.
 
 > "Most of training a small GPT is guess and check. You tweak something, wait,
 > stare at a loss curve, and still cannot answer the one question that matters:
-> why is it doing what it is doing. So I built the instrument I wanted. PodTerm
+> why is it doing what it is doing. So I built the instrument I wanted. GPT Caddy
 > rents a GPU by the minute, runs the training, gives me live X-ray vision into
 > the run, and grades the model's health off the training GPU, so I can see *why*
 > and decide what to change next in minutes, not hours."

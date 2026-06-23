@@ -1,6 +1,6 @@
-# PodTerm code review
+# GPT Caddy code review
 
-PodTerm has a strong foundation for a demo project: the FastAPI application is relatively thin, backend responsibilities are separated into service modules, and the frontend has been broken into focused ES modules.
+GPT Caddy has a strong foundation for a demo project: the FastAPI application is relatively thin, backend responsibilities are separated into service modules, and the frontend has been broken into focused ES modules.
 
 The remaining issues are mostly at system boundaries—threads, asyncio tasks, SQLite, subprocesses, remote RunPod operations, and browser recovery. Several can cause silent data loss or incorrect behavior and should be fixed before presenting the repository as production-quality work.
 
@@ -222,7 +222,7 @@ Before launching:
 * Validate the JSON schema and ensure its checkpoint path and step match the request.
 * Include a generated diagnostic-run ID to prevent stale-file ambiguity.
 
-### 15. Do not pass the entire PodTerm environment to diagnostics
+### 15. Do not pass the entire GPT Caddy environment to diagnostics
 
 **Severity: Medium-high — least privilege**
 
@@ -295,7 +295,7 @@ Stream in chunks to a temporary file while updating the SHA-256 hash. Enforce a 
 
 **Severity: Medium — functional correctness**
 
-`get_git_branches()` executes `git branch` in PodTerm’s current working directory and ignores the subprocess return code. The project documentation says the launched images train code from the sibling `gpt-golf` repository. This can populate the launch form with PodTerm branches rather than training-code branches, depending on how the process was started.
+`get_git_branches()` executes `git branch` in GPT Caddy’s current working directory and ignores the subprocess return code. The project documentation says the launched images train code from the sibling `gpt-golf` repository. This can populate the launch form with GPT Caddy branches rather than training-code branches, depending on how the process was started.
 
 Run Git with an explicit repository path:
 
@@ -356,7 +356,7 @@ For a polished demo:
 
 ## Recommended remediation order
 
-Before using PodTerm as an interview demo, I would complete the work in this order:
+Before using GPT Caddy as an interview demo, I would complete the work in this order:
 
 1. **Data and security:** findings 1–7.
 2. **Concurrency and lifecycle:** findings 8–13.

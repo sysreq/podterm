@@ -13,7 +13,7 @@ VENV=/opt/.venv
 BAKED_EVENTD=/usr/local/bin/pod_eventd.py
 HF_CACHE="$WORKSPACE/.cache/huggingface"
 DEBUG_WAIT_SECS=30      # hold a failed pod open this long for SSH debugging before stopping
-ACK_WAIT_SECS=120      # max wait for PodTerm to pull the final snapshot on a clean exit
+ACK_WAIT_SECS=120      # max wait for GPT Caddy to pull the final snapshot on a clean exit
 
 POD_ID="${RUNPOD_POD_ID:-$(hostname)}"
 LOG="$LOG_DIR/${POD_ID}.log"
@@ -79,10 +79,10 @@ cleanup() {
         echo "==> Non-zero exit, waiting ${DEBUG_WAIT_SECS}s before stopping pod..."
         sleep "$DEBUG_WAIT_SECS"
     else
-        # Hold the pod until PodTerm acks the final snapshot (daemon writes the ack on download).
+        # Hold the pod until GPT Caddy acks the final snapshot (daemon writes the ack on download).
         # Successful runs otherwise stop within seconds, losing the last checkpoint.
         local ack_file="${SNAPSHOT_ACK_FILE:-/workspace/SNAPSHOT_ACK}"
-        echo "==> Waiting up to ${ACK_WAIT_SECS}s for PodTerm to pull the final snapshot..."
+        echo "==> Waiting up to ${ACK_WAIT_SECS}s for GPT Caddy to pull the final snapshot..."
         for _ in $(seq 1 "$ACK_WAIT_SECS"); do
             [ -f "$ack_file" ] && { echo "==> Final snapshot acked; stopping."; break; }
             sleep 1
@@ -96,7 +96,7 @@ cleanup() {
             -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
             -d "{\"query\":\"mutation { podStop(input: { podId: \\\"${RUNPOD_POD_ID}\\\" }) { id desiredStatus } }\"}" || echo "Warning: GraphQL Stop failed."
     else
-        # Without credentials the wedge below never frees the pod — surface it so PodTerm can flag
+        # Without credentials the wedge below never frees the pod — surface it so GPT Caddy can flag
         # the stranded (billing) pod instead of it silently hanging.
         echo "==> WARNING: RUNPOD_API_KEY/RUNPOD_POD_ID unset — cannot auto-stop; pod will wedge (manual stop required)."
         emit phase phase "Auto-stop skipped (no RunPod credentials)" exit_code "$RET"
@@ -130,7 +130,7 @@ sync_code() {
 }
 
 # Hand off to the repo's event daemon if it changed since the image was built. Seq stays stable
-# across the restart (line index of the persistent events file); PodTerm rides out the blip via
+# across the restart (line index of the persistent events file); GPT Caddy rides out the blip via
 # its backoff/retry. Daemon changes therefore ship via git push, no image rebuild.
 swap_daemon() {
     local repo_eventd="$REPO_DIR/scripts/pod_eventd.py"

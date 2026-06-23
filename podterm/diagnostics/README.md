@@ -1,6 +1,6 @@
 # podterm/diagnostics/
 
-Model-health introspection, run **off-pod by PodTerm** on snapshots pulled from a training run
+Model-health introspection, run **off-pod by GPT Caddy** on snapshots pulled from a training run
 (it used to run on the pod at end of run; it now lives here). Probes whatever model structure
 exists at runtime (the model in gpt-golf's `train_gpt.py` changes constantly — diagnostics adapts
 instead of assuming), verifies its own numbers against the real forward pass, and emits a console

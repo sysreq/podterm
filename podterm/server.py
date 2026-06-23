@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     db.close()
 
 
-app = FastAPI(title="PodTerm", lifespan=lifespan)
+app = FastAPI(title="GPT Caddy", lifespan=lifespan)
 
 # Restrictive CSP that works whether Plotly is CDN-loaded or self-hosted under
 # /static/vendor/ ('self' covers the vendored copy).

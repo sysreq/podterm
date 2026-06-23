@@ -1,8 +1,8 @@
-# PodTerm
+# GPT Caddy
 
 A local, single-user FastAPI + vanilla-JS app for launching and monitoring
 micro-GPT training runs on [RunPod](https://www.runpod.io/) GPU pods. Pods run
-images built from the sibling [`gpt-golf`](../gpt-golf) repo; PodTerm provisions
+images built from the sibling [`gpt-golf`](../gpt-golf) repo; GPT Caddy provisions
 them, streams live training telemetry into a dashboard, and runs off-pod
 model-health diagnostics on the snapshots they produce.
 
@@ -13,7 +13,7 @@ model-health diagnostics on the snapshots they produce.
 - **Launch** training runs on RunPod via the `runpodctl` CLI (GPU/datacenter/branch
   selection), tracking each run in a local SQLite DB.
 - **Monitor** runs live: a pod-side event daemon serves structured JSONL events +
-  the raw log; PodTerm pulls them over RunPod's HTTP proxy and fans them out to the
+  the raw log; GPT Caddy pulls them over RunPod's HTTP proxy and fans them out to the
   browser over Server-Sent Events (SSE), persisting metrics as they arrive.
 - **Diagnose** model health off the training GPU: each snapshot is downloaded and
   run through a diagnostics suite locally, producing a threshold-coloured health
@@ -60,7 +60,7 @@ this is best-effort — see `.env.example` for every knob.
 ## Run
 
 ```bash
-uv run podterm                # serves http://127.0.0.1:8000
+uv run gpt-caddy              # serves http://127.0.0.1:8000
 ```
 
 The browser opens automatically. The server binds to `127.0.0.1` only.
@@ -86,7 +86,7 @@ uv run --with pre-commit pre-commit install
 - **Local-only by design.** The server binds to `127.0.0.1:8000` — it is a
   single-user developer tool, not a multi-tenant service. There is no auth layer.
 - **Event-daemon token.** Each launch mints a per-run `EVENTD_TOKEN` (bearer) that
-  authenticates PodTerm's pulls from the pod's event daemon over the RunPod proxy.
+  authenticates GPT Caddy's pulls from the pod's event daemon over the RunPod proxy.
   It is passed to the pod as an env var and persisted in the run's `config_json`.
   Treat the local SQLite DB and `.env` as secrets; both are gitignored.
 - **RunPod credentials** (`RUNPOD_*` API key, the console `__client` cookie used to

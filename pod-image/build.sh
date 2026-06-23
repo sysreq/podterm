@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build (and optionally push) the RunPod images for PodTerm's training pods.
+# Build (and optionally push) the RunPod images for GPT Caddy's training pods.
 #
 # Three images, layered base -> {train, cache-server}:
 #   ghcr.io/sysreq/gpt-caddy-base:latest          (Dockerfile.base)   torch/CUDA venv; rebuilt rarely
@@ -9,7 +9,7 @@
 # The training image bakes gpt-golf's *dependency closure* so the pod's runtime
 # `uv sync` is a no-op — but the training CODE itself is git-cloned at boot
 # (bootstrap.sh). That closure is defined by gpt-golf's pyproject.toml + uv.lock,
-# which we VENDOR here (./pyproject.toml, ./uv.lock — NOT PodTerm's own). This
+# which we VENDOR here (./pyproject.toml, ./uv.lock — NOT GPT Caddy's own). This
 # script refreshes the vendored copies from the gpt-golf checkout before building
 # so the baked venv can never silently drift from gpt-golf's lock.
 #

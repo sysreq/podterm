@@ -1,4 +1,4 @@
-"""Entry point for podterm: uv run podterm"""
+"""Entry point for GPT Caddy: uv run gpt-caddy"""
 
 import logging
 

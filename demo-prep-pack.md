@@ -1,4 +1,4 @@
-# PodTerm Demo Prep Pack (Stellar Science)
+# GPT Caddy Demo Prep Pack (Stellar Science)
 
 > Supporting material for `live-demo-v2.md`: the spoken opener, the three missing
 > slides, and a Q&A drill-down cheat sheet. Built to earn the CEO's sentence
@@ -23,7 +23,7 @@
 > That's slow. And in any project, the thing that actually compounds is how fast
 > you can see what's going on and decide what to do next.
 >
-> So I built the instrument I wanted. This is PodTerm. It rents a GPU by the
+> So I built the instrument I wanted. This is GPT Caddy. It rents a GPU by the
 > minute, runs the training on it, and gives me live X-ray vision into the run
 > while it happens. Then it grades the model's health off the training GPU, so the
 > training never slows down, and it tells me *why* I'm seeing what I'm seeing.
@@ -67,7 +67,7 @@ slide. Everything else is in your mouth, captured in `say`.
 ### Slide 2 — Engineering the runtime (the container craft)
 
 - **Title:** `Making the GPU pay for training, not for booting`
-- **Visual:** two bars side by side: `NVIDIA PyTorch ~10GB` vs `PodTerm <2GB`.
+- **Visual:** two bars side by side: `NVIDIA PyTorch ~10GB` vs `GPT Caddy <2GB`.
 - **on-slide:**
   - Forked **SentencePiece** for multithreaded tokenization (corpus
     divide-and-conquer; no overflow, no cross-thread contention).
@@ -135,7 +135,7 @@ compile cost once per architecture, not once per run.
 **"Walk me through how the pod talks to the laptop."**
 The pod runs a stdlib-only HTTP daemon, no dependencies, so it can start before
 anything is installed. It serves line-delimited JSON events, the raw log, and model
-snapshots. PodTerm reaches it over RunPod's HTTPS proxy with a per-run bearer
+snapshots. GPT Caddy reaches it over RunPod's HTTPS proxy with a per-run bearer
 token, long-polls the events, drains them through a single pipeline, fans them out
 to the browser over Server-Sent Events, and persists to SQLite as they arrive. The
 event schema is a contract between the two repos.
